@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en">
+	<title>crab2313&#x27;s blog - algorithm</title>
+	<link href="https://crab2313.github.io/tags/algorithm/atom.xml" rel="self" type="application/atom+xml"/>
+  <link href="https://crab2313.github.io"/>
+	<generator uri="https://www.getzola.org/">Zola</generator>
+	<updated>2016-04-25T00:00:00+00:00</updated>
+	<id>https://crab2313.github.io/tags/algorithm/atom.xml</id>
+	<entry xml:lang="en">
+		<title>Floyd循环检测算法</title>
+		<published>2016-04-25T00:00:00+00:00</published>
+		<updated>2016-04-25T00:00:00+00:00</updated>
+		<link href="https://crab2313.github.io/floyd-cycle-detection/" type="text/html"/>
+		<id>https://crab2313.github.io/floyd-cycle-detection/</id>
+		<content type="html">&lt;h1 id=&quot;xun-huan-jian-ce-wen-ti&quot;&gt;循环检测问题&lt;&#x2F;h1&gt;
+&lt;p&gt;在研究抽象代数的时候，很多教材都是从欧拉研究的循环群入手的，比如这本《Advanced Modern Algebra》。&lt;&#x2F;p&gt;
+&lt;p&gt;当然，直接讨论数学有些扯远了，我们并不需要群论知识，锦上添花而已。考虑一个由连续自然数组成的集合M， 它由0到n-1的自然数组成，然后考虑一个映射f，它将M映射到它自身，亦即我们定义操作f。&lt;&#x2F;p&gt;
+&lt;p&gt;由于f将M映射到M，对每个e∈M,f(e)总是有定义的，我们可以将某个元素e多次进行f操作。现在我们来考虑靠考虑这样做会发生什么？很显然，这样的操作会形成一个链条装的结构，比如映射&lt;code&gt;f(e) = (e + 1) %  n&lt;&#x2F;code&gt;，取初始数据为0，n = 4，则可以得到：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;0 -&amp;gt; 1 -&amp;gt; 2 -&amp;gt; 3 -&amp;gt; 1 -&amp;gt; 2 -&amp;gt; 3 -&amp;gt; ...
+&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;很显然我们得到了一个循环。一旦这个映射中存在循环，而我们不凑巧掉了进去，就出不来了。&lt;&#x2F;p&gt;
+&lt;p&gt;所以循环检测问题就是如何确定这样的循环是否存在？这个循环的长度？它相对与初始元素的位置？以映射的说法可能不够通俗，但是是最贴近数学的方式，同时也告诉我们这种问题的模型可以应用于多种现实情形。我们可以换一个角度思考，既然映射可以看作链式结构，我们也可以显式的使用链表来模拟这种情形。亦即问题可以转换为给出一个单链表，如何检测链表中是否有这样的循环？&lt;&#x2F;p&gt;
+&lt;h1 id=&quot;floydxun-huan-jian-ce-suan-fa&quot;&gt;Floyd循环检测算法&lt;&#x2F;h1&gt;
+&lt;p&gt;Floyd算法是众多循环检测算法中的一员，它的思想比较简单易懂，运用了快慢指针，现在来分析分析它的原理。&lt;&#x2F;p&gt;
+&lt;p&gt;由与我们的问题分成三个子问题，Floyd循环检测算法也分成三个主要步骤，这三个步骤分别对应三个问题。&lt;&#x2F;p&gt;
+&lt;h1 id=&quot;wen-ti-yi-jian-ce-xun-huan-shi-fou-cun-zai&quot;&gt;问题一：检测循环是否存在&lt;&#x2F;h1&gt;
+&lt;p&gt;这个问题是最主要的问题，为了解决这样的问题，我们将映射抽象成一个单链表，即每个链表只存在一个后继。定义两个指针&lt;code&gt;fast&lt;&#x2F;code&gt;和&lt;code&gt;slow&lt;&#x2F;code&gt;，这两个指针都指向我们链表中的一个元素，由于单链表有且只有一个后继，这两个指针可以单向的向后移。实际问题中，这个链表可能不是无限长的，它有结尾。我们将&lt;code&gt;fast&lt;&#x2F;code&gt;和&lt;code&gt;slow&lt;&#x2F;code&gt;指向链表第一个元素，&lt;code&gt;fast&lt;&#x2F;code&gt;每次向后移动两个元素，&lt;code&gt;slow&lt;&#x2F;code&gt;每次向后移动一个元素，如果链表中存在循环，那么这两个指针必会相遇。&lt;&#x2F;p&gt;
+&lt;p&gt;我们可以证明这两个指针为什么会相遇。假设&lt;code&gt;slow&lt;&#x2F;code&gt;移动了k，则&lt;code&gt;fast&lt;&#x2F;code&gt;移动了2k，显然它们的距离为k，设循环的长度为l（即有l个元素）。由于循环是从1开始增长的，显然必有k为l的倍数的时候。考虑两个指针相遇的条件：1.它们的距离为l的整数倍，2.它们都落在了循环里。由此不难得出它们一定会在循环里相遇。&lt;&#x2F;p&gt;
+&lt;h1 id=&quot;wen-ti-er-xun-huan-suo-zai-de-wei-zhi&quot;&gt;问题二：循环所在的位置&lt;&#x2F;h1&gt;
+&lt;p&gt;这个问题也可以表达成从初始位置向前走多少步可以到达循环的第一个元素。做法很简单，将&lt;code&gt;fast&lt;&#x2F;code&gt;指针移回初始位置，然后&lt;code&gt;slow&lt;&#x2F;code&gt;与&lt;code&gt;fast&lt;&#x2F;code&gt;都以步长为一的速度向前移动，它们相遇时&lt;code&gt;fast&lt;&#x2F;code&gt;移动的距离就是循环所在的位置u。我们来分析以下这是为什么：1.显然，它们的差由原来的&lt;code&gt;fast-slow=k&lt;&#x2F;code&gt;变为了&lt;code&gt;slow-fast=k&lt;&#x2F;code&gt;，并且由于&lt;code&gt;fast&lt;&#x2F;code&gt;与&lt;code&gt;slow&lt;&#x2F;code&gt;的移动速度开始变得相同，它们的距离永远都是k，而k又是l的倍数，所以只要&lt;code&gt;fast&lt;&#x2F;code&gt;和&lt;code&gt;slow&lt;&#x2F;code&gt;一起出现在这个循环里，它们肯定是指向同一个元素。由此&lt;code&gt;fast&lt;&#x2F;code&gt;与&lt;code&gt;slow&lt;&#x2F;code&gt;第一次相等的时候指向的肯定是在循环的第一个元素，亦即&lt;code&gt;fast&lt;&#x2F;code&gt;移动的距离就是不属于循环的元素个数。&lt;&#x2F;p&gt;
+&lt;h1 id=&quot;wen-ti-san-xun-huan-de-chang-du&quot;&gt;问题三：循环的长度&lt;&#x2F;h1&gt;
+&lt;p&gt;这个问题更加简单，既然我们已经确定了循环的存在，并且此时&lt;code&gt;fast&lt;&#x2F;code&gt;与&lt;code&gt;slow&lt;&#x2F;code&gt;都是指向循环开始时的第一个元素，我们需要移动&lt;code&gt;fast&lt;&#x2F;code&gt;和&lt;code&gt;slow&lt;&#x2F;code&gt;指针其中的一个，并固定另一个，直到两个指针所指向的元素再次相同，记录下指针移动的长度就是循环的长度。&lt;&#x2F;p&gt;
+</content>
+	</entry>
+</feed>
