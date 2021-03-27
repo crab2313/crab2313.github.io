@@ -357,7 +357,7 @@
 </code></pre></td></tr></table></div></div><p>剩下的就是申请内存，初始化一些数据结构了，貌似有一些看着比较关键的字段是空着的。后面可以看到这个时候申请的domain仅仅是占位用的，没有什么实际意义。在调用attach_dev时，会初始化domain context。驱动通过<code>struct arm_smmu_domain</code>里的smmu字段判断context是否已经初始化。</p><h2 id=arm_smmu_attach_dev>arm_smmu_attach_dev</h2><p>这里的实现细节是，一个设备的绑定的SMMU与其Stream Mappings已经在<code>add_device</code>回调函数中确定好了。attach_dev的实际操作就是根据设备保存的这些信息初始化domain。初始化domain context由<code>arm_smmu_init_domain_context</code>函数完成，该函数满满的硬件细节，后续需要专门讨论。一个domain在SMMU硬件中实际对应的概念就是Context Bank，在使用Stream Matching的情况下，一共存在三层映射：StreamID && Mask -> S2CR寄存器 -> Context Bank。因此，初始化完domain（即Context Bank）后需要设置当前设备在Stream Mapping中对应的S2CR寄存器，使其指向该domain对应的Context Bank。</p></div><div class=post-copyright><p class=copyright-item><span class=item-title>文章作者</span>
 <span class=item-content>crab2313</span></p><p class=copyright-item><span class=item-title>上次更新</span>
 <span class=item-content>2021-03-27
-<a href=https://github.com/crab2313/blog-doc.git/commit/671307c3d7c9924078fc98631d8e49f90c8c10a7 title="migrate the blog to hugo">(671307c)</a></span></p></div><footer class=post-footer><div class=post-tags><a href=/tags/kernel/>kernel</a>
+<a href=https://github.com/crab2313/blog-doc/commit/fb2211edb998a43b57dbe658d77dfa461e51c7f5 title="migrate the blog to hugo">(fb2211e)</a></span></p></div><footer class=post-footer><div class=post-tags><a href=/tags/kernel/>kernel</a>
 <a href=/tags/iommu/>iommu</a>
 <a href=/tags/arm/>arm</a></div><nav class=post-nav><a class=prev href=/post/ttm/><i class="iconfont icon-left"></i>
 <span class="prev-text nav-default">TTM内存分配器分析</span>
