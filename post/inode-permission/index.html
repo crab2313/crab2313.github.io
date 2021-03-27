@@ -97,7 +97,7 @@
 </code></pre></td></tr></table></div></div><p>对于文件夹：</p><ul><li>CAP_DAC_OVERRIDE直接pass</li><li>CAP_DAC_READ_SEARCH允许MAY_READ和MAY_EXEC</li></ul><p>对于普通文件：</p><ul><li>CAP_DAC_OVERRIDE对待MAY_EXEC是不同的：如果mask中出现了MAY_EXEC，那么只有三组权限位中至少有一个X位被设置的时候才pass，其余情况全pass。</li><li>CAP_DAC_READ_SEARCH只允许MAY_READ</li></ul></div><div class=post-copyright><p class=copyright-item><span class=item-title>文章作者</span>
 <span class=item-content>crab2313</span></p><p class=copyright-item><span class=item-title>上次更新</span>
 <span class=item-content>2021-03-27
-<a href=https://github.com/crab2313/blog-doc/commit/fb2211edb998a43b57dbe658d77dfa461e51c7f5 title="migrate the blog to hugo">(fb2211e)</a></span></p></div><footer class=post-footer><div class=post-tags><a href=/tags/kernel/>kernel</a>
+<a href=https://github.com/crab2313/blog-doc/commit/ab1bf285c9cdeff0e40238932b2d5db70f65c31f title="migrate the blog to hugo">(ab1bf28)</a></span></p></div><footer class=post-footer><div class=post-tags><a href=/tags/kernel/>kernel</a>
 <a href=/tags/filesystem/>filesystem</a></div><nav class=post-nav><a class=prev href=/post/usb-hub/><i class="iconfont icon-left"></i>
 <span class="prev-text nav-default">USB Hub驱动分析</span>
 <span class="prev-text nav-mobile">上一篇</span></a>
