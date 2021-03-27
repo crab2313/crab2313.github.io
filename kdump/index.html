@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+      <meta http-equiv="X-UA-Compatible" content="IE=edge">
+      <meta http-equiv="content-type" content="text/html; charset=utf-8">
+
+      <!-- Enable responsiveness on mobile devices-->
+      <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+
+      <title>crab2313&#x27;s blog - kdump工作机制分析</title>
+
+      
+        <link rel="alternate" type="application/atom+xml" title="RSS" href="https://crab2313.github.io/atom.xml">
+      
+
+      
+          <script src="https://cdnjs.cloudflare.com/ajax/libs/slideout/1.0.1/slideout.min.js"></script>
+          
+      
+
+      
+          <link rel="stylesheet" href="https:&#x2F;&#x2F;crab2313.github.io&#x2F;site.css">
+          
+      
+
+      
+      
+    </head>
+
+    <body>
+        <div class="container">
+
+            <div id="mobile-navbar" class="mobile-navbar">
+              <div class="mobile-header-logo">
+                <a href="/" class="logo">crab2313&#x27;s blog</a>
+              </div>
+              <div class="mobile-navbar-icon icon-out">
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
+            </div>
+
+            <nav id="mobile-menu" class="mobile-menu slideout-menu slideout-menu-left">
+              <ul class="mobile-menu-list">
+                
+                    <li class="mobile-menu-item">
+                        <a href="https:&#x2F;&#x2F;crab2313.github.io">
+                            Home
+                        </a>
+                    </li>
+                
+                    <li class="mobile-menu-item">
+                        <a href="https:&#x2F;&#x2F;crab2313.github.io&#x2F;tags">
+                            Tags
+                        </a>
+                    </li>
+                
+                    <li class="mobile-menu-item">
+                        <a href="https:&#x2F;&#x2F;github.com&#x2F;crab2313">
+                            Github
+                        </a>
+                    </li>
+                
+              </ul>
+            </nav>
+
+            <header id="header">
+                <div class="logo"><a href="https:&#x2F;&#x2F;crab2313.github.io">crab2313&#x27;s blog</a></div>
+                <nav class="menu">
+                    <ul>
+                        
+                            <li>
+                                <a href="https:&#x2F;&#x2F;crab2313.github.io">
+                                    Home
+                                </a>
+                            </li>
+                        
+                            <li>
+                                <a href="https:&#x2F;&#x2F;crab2313.github.io&#x2F;tags">
+                                    Tags
+                                </a>
+                            </li>
+                        
+                            <li>
+                                <a href="https:&#x2F;&#x2F;github.com&#x2F;crab2313">
+                                    Github
+                                </a>
+                            </li>
+                        
+                    </ul>
+                </nav>
+            </header>
+
+            <main>
+                <div class="content" id="mobile-panel">
+                    
+
+
+<div class="post-toc" id="post-toc">
+    <h2 class="post-toc-title">Contents</h2>
+    <div class="post-toc-content always-active">
+        <nav id="TableOfContents">
+            <ul>
+                
+                <li>
+                    <a href="https://crab2313.github.io/kdump/#kdumpctl" class="toc-link">kdumpctl</a>
+                    
+                    <ul>
+                        
+                        <li>
+                            <a href="https://crab2313.github.io/kdump/#statusming-ling" class="toc-link">status命令</a>
+                        </li>
+                        
+                        <li>
+                            <a href="https://crab2313.github.io/kdump/#showmemming-ling" class="toc-link">showmem命令</a>
+                        </li>
+                        
+                        <li>
+                            <a href="https://crab2313.github.io/kdump/#startming-ling" class="toc-link">start命令</a>
+                        </li>
+                        
+                        <li>
+                            <a href="https://crab2313.github.io/kdump/#stopming-ling" class="toc-link">stop命令</a>
+                        </li>
+                        
+                        <li>
+                            <a href="https://crab2313.github.io/kdump/#propagateming-ling" class="toc-link">propagate命令</a>
+                        </li>
+                        
+                        <li>
+                            <a href="https://crab2313.github.io/kdump/#capture-kernel-initrdsheng-cheng" class="toc-link">capture kernel initrd生成</a>
+                        </li>
+                        
+                    </ul>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://crab2313.github.io/kdump/#kexec-tools" class="toc-link">kexec-tools</a>
+                    
+                    <ul>
+                        
+                        <li>
+                            <a href="https://crab2313.github.io/kdump/#kexecgong-ju-dai-ma-zu-zhi" class="toc-link">kexec工具代码组织</a>
+                        </li>
+                        
+                        <li>
+                            <a href="https://crab2313.github.io/kdump/#bi-yao-xin-xi-de-cai-ji" class="toc-link">必要信息的采集</a>
+                        </li>
+                        
+                        <li>
+                            <a href="https://crab2313.github.io/kdump/#corexin-xi-segmentzhuang-zai" class="toc-link">core信息segment装载</a>
+                        </li>
+                        
+                        <li>
+                            <a href="https://crab2313.github.io/kdump/#nei-he-segmentzhuang-zai" class="toc-link">内核segment装载</a>
+                        </li>
+                        
+                        <li>
+                            <a href="https://crab2313.github.io/kdump/#nei-he-ming-ling-xing-yu-initrdde-chuan-ru" class="toc-link">内核命令行与initrd的传入</a>
+                        </li>
+                        
+                        <li>
+                            <a href="https://crab2313.github.io/kdump/#purgatoryji-zhi" class="toc-link">purgatory机制</a>
+                        </li>
+                        
+                        <li>
+                            <a href="https://crab2313.github.io/kdump/#capturenei-he-ru-he-huo-qu-vmcore" class="toc-link">capture内核如何获取vmcore</a>
+                        </li>
+                        
+                        <li>
+                            <a href="https://crab2313.github.io/kdump/#pt-noteru-he-sheng-cheng" class="toc-link">PT_NOTE如何生成</a>
+                        </li>
+                        
+                        <li>
+                            <a href="https://crab2313.github.io/kdump/#build-elf-exec-info" class="toc-link">build_elf_exec_info</a>
+                        </li>
+                        
+                        <li>
+                            <a href="https://crab2313.github.io/kdump/#elf-arm64-load" class="toc-link">elf_arm64_load</a>
+                        </li>
+                        
+                    </ul>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://crab2313.github.io/kdump/#nei-he-ji-zhi" class="toc-link">内核机制</a>
+                    
+                    <ul>
+                        
+                        <li>
+                            <a href="https://crab2313.github.io/kdump/#kexec-segment" class="toc-link">kexec_segment</a>
+                        </li>
+                        
+                        <li>
+                            <a href="https://crab2313.github.io/kdump/#do-kexec-load" class="toc-link">do_kexec_load</a>
+                        </li>
+                        
+                        <li>
+                            <a href="https://crab2313.github.io/kdump/#kimage-entry-t" class="toc-link">kimage_entry_t</a>
+                        </li>
+                        
+                        <li>
+                            <a href="https://crab2313.github.io/kdump/#crash-kexec" class="toc-link">__crash_kexec</a>
+                        </li>
+                        
+                        <li>
+                            <a href="https://crab2313.github.io/kdump/#machine-kexec" class="toc-link">machine_kexec</a>
+                        </li>
+                        
+                        <li>
+                            <a href="https://crab2313.github.io/kdump/#cpu-soft-restart" class="toc-link">cpu_soft_restart</a>
+                        </li>
+                        
+                        <li>
+                            <a href="https://crab2313.github.io/kdump/#arm64-relocate-new-kernel" class="toc-link">arm64_relocate_new_kernel</a>
+                        </li>
+                        
+                    </ul>
+                    
+                </li>
+                
+            </ul>
+        </nav>
+    </div>
+</div>
+
+
+<article class="post">
+    
+    <header class="post__header">
+        <h1 class="post__title">
+            <a href="https:&#x2F;&#x2F;crab2313.github.io&#x2F;kdump&#x2F;">kdump工作机制分析</a>
+        </h1>
+        <div class="post__meta">
+            <span class="post__time">2019-11-22</span>
+            
+        </div>
+    </header>
+
+    <div class="post-content">
+      <h2 id="kdumpctl">kdumpctl</h2>
+<p>kdumpctl是一个shell脚本，用于查看当前kdump的状态和进行kdump相关操作。kdumpctl的入口是main函数，从中可以看到下列命令行参数：</p>
+<table><thead><tr><th>命令</th><th>说明</th></tr></thead><tbody>
+<tr><td>start</td><td>执行capture内核装入</td></tr>
+<tr><td>stop</td><td>卸载capture内核</td></tr>
+<tr><td>status</td><td>显示kdump状态</td></tr>
+<tr><td>restart</td><td>stop + start</td></tr>
+<tr><td>propagate</td><td>将配置文件中设置的ssh-key通过ssh-copy-id拷贝到目标服务器</td></tr>
+<tr><td>showmem</td><td>显示内核为dump预留的内存大小</td></tr>
+</tbody></table>
+<p>首先明确kdumpctl可以工作在两种模式下：kdump和fadump，这里只提kdump模式。</p>
+<h3 id="statusming-ling">status命令</h3>
+<p>status命令直接显示当前是否已经装载了capture内核。具体操作为读取<code>/sys/kernel/kexec_crash_loaded</code>文件，如果文件内容为1则认为capture内核已经装载。</p>
+<h3 id="showmemming-ling">showmem命令</h3>
+<p>即内核为kdump保留的内存空间。从<code>/sys/kernel/kexec_crash_size</code>中读取。</p>
+<h3 id="startming-ling">start命令</h3>
+<p>这里应该是开启kdump服务的操作。但是如果内核的proc中存在<code>/proc/vmcore</code>，即当前内核为capture内核，则会进行保存core文件的操作。在primary内核中，会进行启动操作，在操作前会进行一系列检查：</p>
+<ul>
+<li>检查内核当前是否支持kdump，操作与status命令一致</li>
+<li>检查内核是否为kdump保留了内存空间，操作与showmem命令一致</li>
+<li>检查配置文件<code>/etc/kdump.conf</code>是否合法</li>
+<li>检查raw选项配置的硬盘分区中是否保存有上次生成的内核dump，如果有则将其取出保存在默认目录，并清空该分区</li>
+<li>如果设置了通过ssh远程保存内核dump，则需要检查ssh服务器是否可用</li>
+<li>检查是否需要重新生成capture kernel使用的initrd，如果需要则进行重新生成</li>
+</ul>
+<p>最后则进行kdump内核装载操作。该操作实际上就是调用了kexec工具，如下：</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#c0c5ce;">$KEXEC $KEXEC_ARGS $standard_kexec_args \
+		--commandl-line=&quot;$KDUMP_COMMANDLINE&quot; \
+		--initrd=$TARGET_INITRD $dump_kernel
+</span></code></pre>
+<p>注意到一点是准备内核命令行时加入了<code>disable_cpu_apicid</code>参数，其他没有什么值的注意的了。</p>
+<h3 id="stopming-ling">stop命令</h3>
+<p>这个命令就是简单的调用<code>kexec -p -u</code>将装入的内核卸载。</p>
+<h3 id="propagateming-ling">propagate命令</h3>
+<p>调用ssh-copy-id将<code>kdump.conf</code>文件中配置的ssh-key上传到目标服务器中。</p>
+<h3 id="capture-kernel-initrdsheng-cheng">capture kernel initrd生成</h3>
+<p>该过程在rebuild_kdump_initrd中进行，主要调用如下：</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#c0c5ce;">$MKDUMPRD $TARGET_INITRD $dump_kver
+</span></code></pre>
+<p>其中$MKDUMPRD为<code>/sbin/mkdumprd -f</code>。</p>
+<h2 id="kexec-tools">kexec-tools</h2>
+<h3 id="kexecgong-ju-dai-ma-zu-zhi">kexec工具代码组织</h3>
+<p>首先明确该工具有两种典型的应用场景：</p>
+<ul>
+<li>普通场景，即kexec的设计初衷：从现在运行的内核加载新内核</li>
+<li>crash模式，即通过kexec获取当前运行内核的coredump信息</li>
+</ul>
+<p>在该工具中的代码中，用运行kexec_load系统调用时的flags参数里的<code>KEXEC_ON_CRASH</code>标志区分两种情况：</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#b48ead;">if </span><span style="color:#c0c5ce;">(info-&gt;kexec_flags &amp; KEXEC_ON_CRASH) {
+	...
+}
+</span></code></pre>
+<p>在本文中只分析crash模式下kexec工具的行为。除此之外，该工具高度与运行平台的架构相关，需要注意区分平台相关与平台无关的代码。</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#b48ead;">struct</span><span style="color:#c0c5ce;"> file_type file_type[] = {
+	{&quot;</span><span style="color:#a3be8c;">vmlinux</span><span style="color:#c0c5ce;">&quot;, elf_arm64_probe, elf_arm64_load, elf_arm64_usage},
+	{&quot;</span><span style="color:#a3be8c;">Image</span><span style="color:#c0c5ce;">&quot;, image_arm64_probe, image_arm64_load, image_arm64_usage},
+	{&quot;</span><span style="color:#a3be8c;">uImage</span><span style="color:#c0c5ce;">&quot;, uImage_arm64_probe, uImage_arm64_load, uImage_arm64_usage},
+};
+</span></code></pre>
+<p><code>struct file_type</code>描述当前体系结构下支持的内核文件格式。probe函数用于验证内核文件合法性，load用于装载内核。后续只分析ELF格式的内核装载。</p>
+<p>内核对于kexec特性一共提供了两个系统调用：kexec_load与kexec_file_load，本文重点分析kexec_load。由于kexec_file_load的接口较为简单，其功能主要实现在内核态，该系统调用会在内核代码分析部分提到。kexec_file_load系统调用可以由<code>-s</code>命令行参数强行启用。</p>
+<p><code>kexec_load</code>系统调用原型如下：</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#b48ead;">static inline long </span><span style="color:#8fa1b3;">kexec_load</span><span style="color:#c0c5ce;">(</span><span style="color:#b48ead;">void </span><span style="color:#c0c5ce;">*</span><span style="color:#bf616a;">entry</span><span style="color:#c0c5ce;">, </span><span style="color:#b48ead;">unsigned long </span><span style="color:#bf616a;">nr_segments</span><span style="color:#c0c5ce;">,
+			</span><span style="color:#b48ead;">struct</span><span style="color:#c0c5ce;"> kexec_segment *</span><span style="color:#bf616a;">segments</span><span style="color:#c0c5ce;">, </span><span style="color:#b48ead;">unsigned long </span><span style="color:#bf616a;">flags</span><span style="color:#c0c5ce;">);
+</span></code></pre>
+<p>其中entry为指向跳转地址的指针，<code>segments</code>为一个kexec_segment类型的数组，flags在crash模式下一定要设置<code>KEXEC_ON_CRASH</code>标志。</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#b48ead;">struct </span><span style="color:#c0c5ce;">kexec_segment {
+	</span><span style="color:#b48ead;">const void </span><span style="color:#c0c5ce;">*buf;
+	size_t bufsz;
+	</span><span style="color:#b48ead;">const void </span><span style="color:#c0c5ce;">*mem;
+	size_t memsz;
+};
+</span></code></pre>
+<p><code>kexec_segment</code>类型数组的目的是向内核描述一串内存区域，其元素的组织为：</p>
+<ul>
+<li>buf &amp;&amp; bufsz： 用户态缓冲区及其长度</li>
+<li>mem &amp;&amp; memsz： 物理内存起始地址及其长度</li>
+</ul>
+<p>这个参数的目的是让内核将用户态缓冲区的内容拷贝到物理地址中，因此kexec工具的主要功能就如同一个bootloader，通过kexec_load系统调用将特定内存装载到特定物理地址，然后跳转到entry指针指向的内存执行。</p>
+<h3 id="bi-yao-xin-xi-de-cai-ji">必要信息的采集</h3>
+<p><code>crash_get_memory_ranges</code>函数实际上描述如何parse当前系统物理内存layout。函数实质上会输出三个信息：</p>
+<ul>
+<li>system_memory_rgns</li>
+<li>usablemem_rgns</li>
+<li>elf_info</li>
+</ul>
+<p>system_memory_rgns和usablemem_rgns是<code>struct memory_ranges</code>类型的数据，其结构简单易懂不再赘述。</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#b48ead;">struct </span><span style="color:#c0c5ce;">memory_ranges {
+        </span><span style="color:#b48ead;">unsigned int</span><span style="color:#c0c5ce;"> size;
+        </span><span style="color:#b48ead;">unsigned int</span><span style="color:#c0c5ce;"> max_size;
+        </span><span style="color:#b48ead;">struct </span><span style="color:#c0c5ce;">memory_range *ranges;
+};
+
+</span><span style="color:#b48ead;">struct </span><span style="color:#c0c5ce;">memory_range {
+	</span><span style="color:#b48ead;">unsigned long long</span><span style="color:#c0c5ce;"> start, end;
+	</span><span style="color:#b48ead;">unsigned</span><span style="color:#c0c5ce;"> type;
+</span><span style="color:#b48ead;">#define </span><span style="color:#c0c5ce;">RANGE_RAM	</span><span style="color:#d08770;">0
+</span><span style="color:#b48ead;">#define </span><span style="color:#c0c5ce;">RANGE_RESERVED	</span><span style="color:#d08770;">1
+</span><span style="color:#b48ead;">#define </span><span style="color:#c0c5ce;">RANGE_ACPI	</span><span style="color:#d08770;">2
+</span><span style="color:#b48ead;">#define </span><span style="color:#c0c5ce;">RANGE_ACPI_NVS	</span><span style="color:#d08770;">3
+</span><span style="color:#b48ead;">#define </span><span style="color:#c0c5ce;">RANGE_UNCACHED	</span><span style="color:#d08770;">4
+</span><span style="color:#b48ead;">#define </span><span style="color:#c0c5ce;">RANGE_PMEM		</span><span style="color:#d08770;">6
+</span><span style="color:#b48ead;">#define </span><span style="color:#c0c5ce;">RANGE_PRAM		</span><span style="color:#d08770;">11
+</span><span style="color:#c0c5ce;">};
+</span></code></pre>
+<p>函数简单读取<code>/proc/iomem</code>文件内容，对其进行解析：</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#c0c5ce;">	</span><span style="color:#b48ead;">if </span><span style="color:#c0c5ce;">(!usablemem_rgns.</span><span style="color:#bf616a;">size</span><span style="color:#c0c5ce;">)
+		</span><span style="color:#bf616a;">kexec_iomem_for_each_line</span><span style="color:#c0c5ce;">(</span><span style="color:#d08770;">NULL</span><span style="color:#c0c5ce;">, iomem_range_callback, </span><span style="color:#d08770;">NULL</span><span style="color:#c0c5ce;">);
+</span></code></pre>
+<p>对该文件每一个条目，调用<code>iomem_range_callback</code>进行处理。该函数将遇到的<code>System RAM</code>区域保存在<code>system_memory_rgns</code>，将<code>Crash kernel</code>区域保存在<code>usablemem_rgns</code>里。函数中可以通过计算得到elf_info的一些字段，elf_info最后用于创建elf文件的header。</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#b48ead;">struct </span><span style="color:#c0c5ce;">crash_elf_info {
+	</span><span style="color:#b48ead;">unsigned long</span><span style="color:#c0c5ce;"> class;
+	</span><span style="color:#b48ead;">unsigned long</span><span style="color:#c0c5ce;"> data;
+	</span><span style="color:#b48ead;">unsigned long</span><span style="color:#c0c5ce;"> machine;
+
+	</span><span style="color:#b48ead;">unsigned long long</span><span style="color:#c0c5ce;"> page_offset;
+	</span><span style="color:#b48ead;">unsigned long long</span><span style="color:#c0c5ce;"> kern_vaddr_start;
+	</span><span style="color:#b48ead;">unsigned long long</span><span style="color:#c0c5ce;"> kern_paddr_start;
+	</span><span style="color:#b48ead;">unsigned long</span><span style="color:#c0c5ce;"> kern_size;
+	</span><span style="color:#b48ead;">unsigned long</span><span style="color:#c0c5ce;"> lowmem_limit;
+
+	</span><span style="color:#b48ead;">int </span><span style="color:#c0c5ce;">(*get_note_info)(</span><span style="color:#b48ead;">int</span><span style="color:#c0c5ce;"> cpu, uint64_t *addr, uint64_t *len);
+};
+</span></code></pre>
+<p><code>kern_paddr_start</code>即内核的物理起始地址设置为<code>Kernel code</code>内存区域的起始地址。内核的长度即<code>kern_size</code>可以通过<code>Kernel data</code>的结尾地址减去<code>Kernel code</code>的起始地址获得。<code>kern_vaddr_start</code>为内核的起始虚拟地址，可以通过读取<code>/proc/kallsym</code>文件中的<code>_text</code>符号地址获取。理解这些参数的获取方法本质上需要理解内核在内存中的layout。</p>
+<h3 id="corexin-xi-segmentzhuang-zai">core信息segment装载</h3>
+<p>首先明确core信息是什么。在capture内核执行时，并没有直接的方式获取原先crash掉的内核的内存布局，因此开发者设计了针对此情况的辅助机制。capture内核启动时，可以通过<code>elfcorehdr</code>命令行参数或者<code>/chosen/linux,elfcorehdr</code>设备树节点向其传递一个core类型的ELF文件header。该ELF文件header由kexec放置在crashkernel保留的内存区域中，并通过物理内存地址的方式传递给capture内核。该header以program header的形式记录了原内核运行时的内存布局以及内核crash时用于保存crash信息时的内存区域物理地址。</p>
+<p>该操作在kexec中由<code>load_crashdump_segments</code>函数实现，其中的核心操作即生成ELF header由<code>crash_create_elf64_headers</code>函数实现。对于每一个处于运行状态的逻辑CPU都有与之对应的一片内存区域，内核crash时，会将对应于该CPU的信息（寄存器，内核栈等）保存于此。这片内存区域的物理地址与大小由：</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#c0c5ce;">/sys/devices/system/cpu/cpu[N]/crash_notes
+/sys/devices/system/cpu/cpu[N]/crash_notes_size
+</span></code></pre>
+<p>这两个文件导出到了用户态供kexec读取。与之类似的还有vmcoreinfo：</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#c0c5ce;">/sys/kernel/vmcoreinfo
+</span></code></pre>
+<p>函数会将这些信息以PT_NOTE的形式记录为ELF header的Program header。除此之外，还需要以PT_LOAD的形式记录内核的<code>System RAM</code>内存区域，这些区域可以通过枚举<code>/proc/iomem</code>文件获取。对于relocatable的内核或者实际放置地址存在偏移量的内核，仍需重复记录一遍内核占用内存区域的内存空间，即需要新增一个PT_LOAD类型的Program header，然后将其pt_vaddr设置为内核起始虚拟地址。</p>
+<p>这个ET_CORE类型的ELF header保存在crashkernel保留的内存区域中，并创建对应的kexec_segment。后续会通过修改DTB并加入<code>/chosen/linux,elfcorehdr</code>的方式传递给capture内核。</p>
+<h3 id="nei-he-segmentzhuang-zai">内核segment装载</h3>
+<p>首先调用<code>arm64_locate_kernel_segment</code>函数获取内核装载的起始地址。</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#c0c5ce;">		hole = (crash_reserved_mem.</span><span style="color:#bf616a;">start </span><span style="color:#c0c5ce;">&lt; mem_min ?
+				mem_min : crash_reserved_mem.</span><span style="color:#bf616a;">start</span><span style="color:#c0c5ce;">);
+		hole = </span><span style="color:#bf616a;">_ALIGN_UP</span><span style="color:#c0c5ce;">(hole, </span><span style="color:#bf616a;">MiB</span><span style="color:#c0c5ce;">(</span><span style="color:#d08770;">2</span><span style="color:#c0c5ce;">));
+</span></code></pre>
+<p>注意ARM64内核boot协议中明确要求内核放置地址应该2M对齐。然后调用<code>fixup_elf_header</code>函数，目的是根据实际情况修正ELF格式内核的entry和program headers，使后续处理ELF格式文件的通用代码正确执行。</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#c0c5ce;">	</span><span style="color:#65737e;">/* load the kernel */
+	</span><span style="color:#b48ead;">if </span><span style="color:#c0c5ce;">(info-&gt;kexec_flags &amp; KEXEC_ON_CRASH)
+		</span><span style="color:#65737e;">/*
+		 * offset addresses in elf header in order to load
+		 * vmlinux (elf_exec) into crash kernel&#39;s memory
+		 */
+		</span><span style="color:#bf616a;">fixup_elf_addrs</span><span style="color:#c0c5ce;">(&amp;ehdr);
+</span></code></pre>
+<p>我们实际上要将位于<code>arm64_mem.phys_offset</code>物理地址上的内核搬运到<code>crash_reserved_mem.start</code>上，搬运偏移量为<code>crash_reserved_mem.start - arm64_mem.phys_offset</code>。对于ELF header里的entry地址和所有PT_LOAD类型的program header对应的虚拟地址，要加上这个偏移量，才能使后续的<code>elf_exec_load</code>函数将其装载到正确的物理地址上。</p>
+<p>对于<code>elf_exec_load</code>函数，我们可以忽略其对<code>ET_DYN</code>类型ELF文件的处理，因为ELF格式的内核不是该类型的ELF文件。函数中，对于每一个PT_LOAD类型的program header，都执行如下操作：</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#c0c5ce;">		</span><span style="color:#bf616a;">add_segment</span><span style="color:#c0c5ce;">(info,
+			phdr-&gt;p_data, size,
+			phdr-&gt;p_paddr + base, phdr-&gt;p_memsz);
+</span></code></pre>
+<p>该函数定义如下：</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#b48ead;">void </span><span style="color:#8fa1b3;">add_segment</span><span style="color:#c0c5ce;">(</span><span style="color:#b48ead;">struct</span><span style="color:#c0c5ce;"> kexec_info *</span><span style="color:#bf616a;">info</span><span style="color:#c0c5ce;">, </span><span style="color:#b48ead;">const void </span><span style="color:#c0c5ce;">*</span><span style="color:#bf616a;">buf</span><span style="color:#c0c5ce;">, size_t </span><span style="color:#bf616a;">bufsz</span><span style="color:#c0c5ce;">,
+	</span><span style="color:#b48ead;">unsigned long </span><span style="color:#bf616a;">base</span><span style="color:#c0c5ce;">, size_t </span><span style="color:#bf616a;">memsz</span><span style="color:#c0c5ce;">)
+{
+	</span><span style="color:#bf616a;">add_segment_phys_virt</span><span style="color:#c0c5ce;">(info, buf, bufsz, base, memsz, </span><span style="color:#d08770;">1</span><span style="color:#c0c5ce;">);
+}
+</span></code></pre>
+<p>注意<code>add_segment_phys_virt</code>的最后一个参数为1，这表明应该将传入的地址当作虚拟地址对待，通过<code>virt_to_phys</code>函数将其转换为物理地址。</p>
+<h3 id="nei-he-ming-ling-xing-yu-initrdde-chuan-ru">内核命令行与initrd的传入</h3>
+<p>ARM64内核启动时，要求用x0寄存器传递DTB在内存中的地址。kexec工具支持从命令行传入被装载内核的DTB文件，因此kexec可以从三个地方获取装载内核的DTB文件：</p>
+<ul>
+<li>命令行传入文件</li>
+<li>/sys/firmware/fdt</li>
+<li>/proc/device-tree</li>
+</ul>
+<p>优先级由高到低。获取到DTB之后，需要分别修正三个地方：</p>
+<ul>
+<li>/chosen/bootargs          # 内核命令行</li>
+<li>/chosen/linux,elfcorehdr           # 前面提到的ELF header地址</li>
+<li>/chosen/linux,usable-memory-range     # 可用的内存区域，即crashkernel保留的内存区域</li>
+</ul>
+<p>然后将initrd装载到一个新的kexec_segment中，然后修正DTB，加入initrd相关的结点：</p>
+<ul>
+<li>/chosen/linux,initrd-start</li>
+<li>/chosen/linux,initrd-end</li>
+</ul>
+<p>最后将DTB装入自己的kexec_segment中。后面会提到，DTB的地址由purgatory通过x0寄存器传递给capture内核。</p>
+<h3 id="purgatoryji-zhi">purgatory机制</h3>
+<p>前面可能已经注意到了，最终传递给<code>kexec_load</code>系统调用的entry参数并不是直接指向内核的。这说明kexec实现了自己的微型引导程序。kexec中这段微型引导程序被称为purgatory，其作用主要为校验内核镜像的哈希值与跳转到内核执行。该引导程序唯一需要准备的就是内核执行时将x0置为DTB的物理地址，其他ARM64内核boot协议中要求的条件都将由primary内核在crash时准备妥当。</p>
+<p>purgatory的实现比较简单，由一小段汇编与一个用于计算内核镜像哈希值的C语言函数组成。程序被编译链接成relocatable的ELF文件镜像，并由kexec工程的编译系统将这个EFL文件填充至一个字节数组中备用。</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#b48ead;">const char</span><span style="color:#c0c5ce;"> purgatory[] = {
+</span><span style="color:#d08770;">0x7f</span><span style="color:#c0c5ce;">, </span><span style="color:#d08770;">0x45</span><span style="color:#c0c5ce;">, </span><span style="color:#d08770;">0x4c</span><span style="color:#c0c5ce;">, </span><span style="color:#d08770;">0x46</span><span style="color:#c0c5ce;">, </span><span style="color:#d08770;">0x02</span><span style="color:#c0c5ce;">, </span><span style="color:#d08770;">0x01</span><span style="color:#c0c5ce;">, </span><span style="color:#d08770;">0x01</span><span style="color:#c0c5ce;">, </span><span style="color:#d08770;">0x00</span><span style="color:#c0c5ce;">, </span><span style="color:#d08770;">0x00</span><span style="color:#c0c5ce;">, </span><span style="color:#d08770;">0x00</span><span style="color:#c0c5ce;">, </span><span style="color:#d08770;">0x00</span><span style="color:#c0c5ce;">, </span><span style="color:#d08770;">0x00</span><span style="color:#c0c5ce;">, </span><span style="color:#d08770;">0x00</span><span style="color:#c0c5ce;">, </span><span style="color:#d08770;">0x00</span><span style="color:#c0c5ce;">, </span><span style="color:#d08770;">0x00</span><span style="color:#c0c5ce;">, </span><span style="color:#d08770;">0x00</span><span style="color:#c0c5ce;">,
+</span><span style="color:#d08770;">0x01</span><span style="color:#c0c5ce;">, </span><span style="color:#d08770;">0x00</span><span style="color:#c0c5ce;">, </span><span style="color:#d08770;">0x3e</span><span style="color:#c0c5ce;">, </span><span style="color:#d08770;">0x00</span><span style="color:#c0c5ce;">, </span><span style="color:#d08770;">0x01</span><span style="color:#c0c5ce;">, </span><span style="color:#d08770;">0x00</span><span style="color:#c0c5ce;">, </span><span style="color:#d08770;">0x00</span><span style="color:#c0c5ce;">, </span><span style="color:#d08770;">0x00</span><span style="color:#c0c5ce;">, </span><span style="color:#d08770;">0x40</span><span style="color:#c0c5ce;">, </span><span style="color:#d08770;">0x07</span><span style="color:#c0c5ce;">, </span><span style="color:#d08770;">0x00</span><span style="color:#c0c5ce;">, </span><span style="color:#d08770;">0x00</span><span style="color:#c0c5ce;">, </span><span style="color:#d08770;">0x00</span><span style="color:#c0c5ce;">, </span><span style="color:#d08770;">0x00</span><span style="color:#c0c5ce;">, </span><span style="color:#d08770;">0x00</span><span style="color:#c0c5ce;">, </span><span style="color:#d08770;">0x00</span><span style="color:#c0c5ce;">,
+    ...
+</span></code></pre><pre style="background-color:#2b303b;">
+<code><span style="color:#8fa1b3;">.globl purgatory_start
+purgatory_start:
+
+	adr	x19</span><span style="color:#c0c5ce;">, </span><span style="color:#8fa1b3;">.Lstack
+	</span><span style="color:#b48ead;">mov	</span><span style="color:#bf616a;">sp</span><span style="color:#c0c5ce;">, </span><span style="color:#8fa1b3;">x19
+
+	</span><span style="color:#bf616a;">bl	</span><span style="color:#8fa1b3;">purgatory
+
+	/</span><span style="color:#c0c5ce;">* </span><span style="color:#8fa1b3;">Start new image. </span><span style="color:#c0c5ce;">*</span><span style="color:#8fa1b3;">/
+	ldr	x17</span><span style="color:#c0c5ce;">, </span><span style="color:#8fa1b3;">arm64_kernel_entry
+	ldr	x0</span><span style="color:#c0c5ce;">, </span><span style="color:#8fa1b3;">arm64_dtb_addr
+	</span><span style="color:#b48ead;">mov	</span><span style="color:#8fa1b3;">x1</span><span style="color:#c0c5ce;">, </span><span style="color:#8fa1b3;">xzr
+	</span><span style="color:#b48ead;">mov	</span><span style="color:#8fa1b3;">x2</span><span style="color:#c0c5ce;">, </span><span style="color:#8fa1b3;">xzr
+	</span><span style="color:#b48ead;">mov	</span><span style="color:#8fa1b3;">x3</span><span style="color:#c0c5ce;">, </span><span style="color:#8fa1b3;">xzr
+	br	x17
+
+size purgatory_start
+</span></code></pre>
+<p>arm64_kernel_entry和arm64_dtb_addr都是64位的指针，由kexec装载purgatory到内存时填充。注意purgatory是relocatable的镜像，在装入内存时需要进行relocate操作，kexec完整了relocatable ELF镜像的loader。ELF文件格式及其装载操作可以参考ELF Spec文档，这里不再赘述。</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#c0c5ce;">	</span><span style="color:#65737e;">// 读取purgatory_start在内存中relocate后的位置
+</span><span style="color:#c0c5ce;">	info-&gt;entry = (</span><span style="color:#b48ead;">void </span><span style="color:#c0c5ce;">*)</span><span style="color:#bf616a;">elf_rel_get_addr</span><span style="color:#c0c5ce;">(&amp;info-&gt;rhdr, &quot;</span><span style="color:#a3be8c;">purgatory_start</span><span style="color:#c0c5ce;">&quot;);
+	</span><span style="color:#65737e;">// image_base = kernel_segment + arm64_mem.text_offset
+	</span><span style="color:#bf616a;">elf_rel_set_symbol</span><span style="color:#c0c5ce;">(&amp;info-&gt;rhdr, &quot;</span><span style="color:#a3be8c;">arm64_kernel_entry</span><span style="color:#c0c5ce;">&quot;, &amp;image_base,
+		sizeof(image_base));
+    </span><span style="color:#65737e;">// 设置装载到内存中的arm64_dtb_addr变量的值
+	</span><span style="color:#bf616a;">elf_rel_set_symbol</span><span style="color:#c0c5ce;">(&amp;info-&gt;rhdr, &quot;</span><span style="color:#a3be8c;">arm64_dtb_addr</span><span style="color:#c0c5ce;">&quot;, &amp;dtb_base,
+		sizeof(dtb_base));
+</span></code></pre><h3 id="capturenei-he-ru-he-huo-qu-vmcore">capture内核如何获取vmcore</h3>
+<p>这个问题的前置问题是：capture内核如何确定自己是capture内核？内核启动时会检测<code>elfcorehdr</code>命令行参数（或者<code>/chosen/linux,elfcorehdr</code>设备树节点），如果存在则认为自己是capture内核。内核parse完该参数后，会将<code>elfcorehdr</code>的地址保存在<code>elfcorehdr_addr</code>变量中，后续也以该变量的值确认当前的状态。</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#b48ead;">static inline bool </span><span style="color:#8fa1b3;">is_kdump_kernel</span><span style="color:#c0c5ce;">(</span><span style="color:#b48ead;">void</span><span style="color:#c0c5ce;">)
+{
+	</span><span style="color:#b48ead;">return</span><span style="color:#c0c5ce;"> elfcorehdr_addr != ELFCORE_ADDR_MAX;
+}
+</span></code></pre>
+<p>用户态判断当前的内核是否为capture内核的直接方式是确认<code>/proc/vmcore</code>是否存在。那么分析内核代码时，也需要从这里入手。前面elfcorehdr参数实际上是一个earlyparam，因此在调用<code>__init</code>函数之前就已经完成的处理。内核中注册了位于<code>fs/proc/vmcore.c</code>中的<code>vmcore_init</code>函数，用于处理从primary内核传入的elfcorehdr。</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#bf616a;">fs_initcall</span><span style="color:#c0c5ce;">(vmcore_init);
+</span></code></pre>
+<p>该函数在检测到elfcorehdr后会进行处理，然后注册<code>/proc/vmcore</code>文件。处理过程较为简单，下面主要提及主要步骤：</p>
+<ul>
+<li>将所有的PT_NOTE类型的Program header合并成一个</li>
+<li>重新计算所有Program Header类型的大小及偏移量</li>
+<li>将所有需要dump内存区域的信息整理成一个链表备用</li>
+<li>计算vmcore文件的大小</li>
+</ul>
+<p>最后用户态读取<code>/proc/vmcore</code>文件时，对于vmcore的ELF header和PT_NOTE可以直接读取，对于需要读取内存dump时则从原先primary内核的地址空间读取，省去了大片内存的拷贝。</p>
+<h3 id="pt-noteru-he-sheng-cheng">PT_NOTE如何生成</h3>
+<p>前面看到PT_NOTE类型的Program header一共有两类，分别由：</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#c0c5ce;">/sys/devices/system/cpu/cpu[N]/crash_notes{,_size}
+/sys/kernel/vmcoreinfo
+</span></code></pre>
+<p>给出其物理地址。内核crash时应该会向其中写入对应的PT_NOTE类型的Program headers。这种类型的Program header的内容是由不定长的条目组成的，每个条目的header如下：</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#65737e;">/* Note header in a PT_NOTE section */
+</span><span style="color:#b48ead;">typedef struct</span><span style="color:#c0c5ce;"> elf64_note {
+  Elf64_Word n_namesz;	</span><span style="color:#65737e;">/* Name size */
+</span><span style="color:#c0c5ce;">  Elf64_Word n_descsz;	</span><span style="color:#65737e;">/* Content size */
+</span><span style="color:#c0c5ce;">  Elf64_Word n_type;	</span><span style="color:#65737e;">/* Content type */
+</span><span style="color:#c0c5ce;">} Elf64_Nhdr
+</span></code></pre>
+<p>在header之后紧随name和desc的字符串，字符串的首尾必须4字节对齐。name与type表示该条目的名称与类型，是由core文件生成方与读取方协定好的。条目的内容存放在desc中，格式也由core文件生成方自行定义，ELF文件spec中没有过多定义。</p>
+<p>先看vmcoreinfo，该文件在内核编译时开启了<code>CONFIG_CRASH_CORE</code>时会存在：</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#b48ead;">#ifdef</span><span style="color:#c0c5ce;"> CONFIG_CRASH_CORE
+
+</span><span style="color:#b48ead;">static </span><span style="color:#c0c5ce;">ssize_t </span><span style="color:#8fa1b3;">vmcoreinfo_show</span><span style="color:#c0c5ce;">(</span><span style="color:#b48ead;">struct</span><span style="color:#c0c5ce;"> kobject *</span><span style="color:#bf616a;">kobj</span><span style="color:#c0c5ce;">,
+			       </span><span style="color:#b48ead;">struct</span><span style="color:#c0c5ce;"> kobj_attribute *</span><span style="color:#bf616a;">attr</span><span style="color:#c0c5ce;">, </span><span style="color:#b48ead;">char </span><span style="color:#c0c5ce;">*</span><span style="color:#bf616a;">buf</span><span style="color:#c0c5ce;">)
+{
+	phys_addr_t vmcore_base = </span><span style="color:#bf616a;">paddr_vmcoreinfo_note</span><span style="color:#c0c5ce;">();
+	</span><span style="color:#b48ead;">return </span><span style="color:#96b5b4;">sprintf</span><span style="color:#c0c5ce;">(buf, &quot;</span><span style="color:#d08770;">%p</span><span style="color:#a3be8c;">a </span><span style="color:#d08770;">%x</span><span style="color:#96b5b4;">\n</span><span style="color:#c0c5ce;">&quot;, &amp;vmcore_base,
+			(</span><span style="color:#b48ead;">unsigned int</span><span style="color:#c0c5ce;">)VMCOREINFO_NOTE_SIZE);
+}
+</span><span style="color:#bf616a;">KERNEL_ATTR_RO</span><span style="color:#c0c5ce;">(vmcoreinfo);
+
+</span><span style="color:#b48ead;">#endif </span><span style="color:#65737e;">/* CONFIG_CRASH_CORE */
+</span></code></pre>
+<p>这个PT_NOTE只有一个条目，其name与type为<code>VMCOREINFO</code>和0。desc格式如下：</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#c0c5ce;">{TYPE}({NAME})={VALUE}\n
+{TYPE}({NAME})={VALUE}\n
+{TYPE}({NAME})={VALUE}\n
+</span></code></pre>
+<p>主要记录内核中一些关键符号的物理地址、关键数据类型的字段偏移量和关键常量的值，具体内容可以参见<a href="https://www.kernel.org/doc/html/latest/admin-guide/kdump/vmcoreinfo.html">内核文档</a>。由于这些信息都是内核的固有信息，因此这些内容在内核初始化是就会自动生成。</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#bf616a;">subsys_initcall</span><span style="color:#c0c5ce;">(crash_save_vmcoreinfo_init);
+</span></code></pre>
+<p>下面来介绍crash_notes相关的信息。crash_notes应该是每个逻辑CPU对应一个，所以是一个percpu的变量，文件本身的定义在<code>driver/base/cpu.c</code>中可以找到。可以想象到crash_note是一个buffer的物理地址，这个buffer在<code>kernel/kexec_core.c</code>中定义。</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#c0c5ce;">note_buf_t __percpu *crash_notes;
+
+typedef u32 note_buf_t[CRASH_CORE_NOTE_BYTES/</span><span style="color:#d08770;">4</span><span style="color:#c0c5ce;">];
+</span></code></pre>
+<p>该percpu变量由<code>crash_notes_memory_init</code>函数初始化。前面看到，ARM64内核下内核崩溃时会调用<code>machine_crash_shutdown</code>函数，进而调用到<code>crash_save_cpu</code>函数，该函数会填写<code>crash_notes</code>。从中可以发现该函数填写的是标准的PTSTATUS信息，即普通coredump通用的线程信息，其name与type分别为<code>CORE</code>和NT_PRSTATUS（1）。函数只拷贝了当前CPU的运行task的PID与当前CPU的通用寄存器。</p>
+<p>crash_save_cpu可能从两条code path被调用。内核崩溃时，触发崩溃的CPU会调用crash_save_cpu，并通过IPI中断告知其他CPU内核已经崩溃。在其他CPU的IPI中断处理函数中也会调用一次crash_save_cpu用以保存其他CPU的现场。</p>
+<h3 id="build-elf-exec-info">build_elf_exec_info</h3>
+<p>函数本质是通过搜集系统信息获取以下结构体的字段，然后对ELF文件进行合法性检查。传入的buf其实就是crash内核解压后的内容。</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#b48ead;">struct </span><span style="color:#c0c5ce;">mem_ehdr {
+	</span><span style="color:#b48ead;">unsigned</span><span style="color:#c0c5ce;"> ei_class;
+	</span><span style="color:#b48ead;">unsigned</span><span style="color:#c0c5ce;"> ei_data;
+	</span><span style="color:#b48ead;">unsigned</span><span style="color:#c0c5ce;"> e_type;
+	</span><span style="color:#b48ead;">unsigned</span><span style="color:#c0c5ce;"> e_machine;
+	</span><span style="color:#b48ead;">unsigned</span><span style="color:#c0c5ce;"> e_version;
+	</span><span style="color:#b48ead;">unsigned</span><span style="color:#c0c5ce;"> e_flags;
+	</span><span style="color:#b48ead;">unsigned</span><span style="color:#c0c5ce;"> e_phnum;
+	</span><span style="color:#b48ead;">unsigned</span><span style="color:#c0c5ce;"> e_shnum;
+	</span><span style="color:#b48ead;">unsigned</span><span style="color:#c0c5ce;"> e_shstrndx;
+	</span><span style="color:#b48ead;">unsigned long long</span><span style="color:#c0c5ce;"> e_entry;
+	</span><span style="color:#b48ead;">unsigned long long</span><span style="color:#c0c5ce;"> e_phoff;
+	</span><span style="color:#b48ead;">unsigned long long</span><span style="color:#c0c5ce;"> e_shoff;
+	</span><span style="color:#b48ead;">unsigned</span><span style="color:#c0c5ce;"> e_notenum;
+	</span><span style="color:#b48ead;">struct </span><span style="color:#c0c5ce;">mem_phdr *e_phdr;
+	</span><span style="color:#b48ead;">struct </span><span style="color:#c0c5ce;">mem_shdr *e_shdr;
+	</span><span style="color:#b48ead;">struct </span><span style="color:#c0c5ce;">mem_note *e_note;
+	</span><span style="color:#b48ead;">unsigned long</span><span style="color:#c0c5ce;"> rel_addr, rel_size;
+};
+</span></code></pre>
+<p>函数内部调用到了<code>build_elf_info</code>，继而调用到了<code>build_mem_ehdr</code>。<code>build_mem_ehdr函数</code>内部基本上就是填充ELF identity相关的字段，然后检查ELF header的合法性，最后根据ELF class的值（elf32或者elf64）将剩余工作委托给<code>build_mem_elf32_ehdr</code>函数或者<code>build_mem_elf64_ehdr</code>。这两个函数内部仅仅是拷贝对应字段，然后转换对应endian到host端endian。</p>
+<h3 id="elf-arm64-load">elf_arm64_load</h3>
+<p>前面可以看到，对于每一个架构，架构相关代码注册该架构能够处理的内核文件格式。该函数就是对应于ELF格式的内核装载函数。函数首先调用<code>build_elf_exec_info</code>将ELF内核相关的ELF headers拷贝出来，其实就是换个格式原样copy，改了下endian。</p>
+<p>然后函数开始处理image header，这里的image header指ARM64的内核镜像的image header。可以从内核文档的ARM64 boot protocol中得到该header的信息。我们从内核的连接脚本可以知道ELF格式的内核有两个PT_LOAD类型的segment，分别为code和data。对于这两个segment，尝试从中读取image header。我们知道有个内核特性能够让内核的text段装载地址随机化，这里需要特殊处理一下，否则是找不到image header的。</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#c0c5ce;">		header_offset = ehdr.</span><span style="color:#bf616a;">e_entry </span><span style="color:#c0c5ce;">- phdr-&gt;p_vaddr;
+
+		header = (</span><span style="color:#b48ead;">const struct</span><span style="color:#c0c5ce;"> arm64_image_header *)(
+			kernel_buf + phdr-&gt;p_offset + header_offset);
+</span></code></pre>
+<p>在确认ARM64内核的magic无误之后，可以认为读取到了image header。接下来需要从image header中拿出两个值：text_offset和image_size，这两个值对于后面装载内核至关重要。在比较旧的内核（&lt;3.17）中没有这两个值，需要使用默认值，这里需要注意。image_size即ARM64内核镜像的大小，text_offset为内核被放置的偏移量，后面详细说明。</p>
+<p>函数后续调用<code>arm64_locate_kernel_segment</code>计算出内核放置的位置。对于crash模式，放置地址需要在crashkernel保留的内存空间中。</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#c0c5ce;">	kernel_segment = </span><span style="color:#bf616a;">arm64_locate_kernel_segment</span><span style="color:#c0c5ce;">(info);
+</span></code></pre><pre style="background-color:#2b303b;">
+<code><span style="color:#c0c5ce;">		hole = (crash_reserved_mem.</span><span style="color:#bf616a;">start </span><span style="color:#c0c5ce;">&lt; mem_min ?
+				mem_min : crash_reserved_mem.</span><span style="color:#bf616a;">start</span><span style="color:#c0c5ce;">);
+		hole = </span><span style="color:#bf616a;">_ALIGN_UP</span><span style="color:#c0c5ce;">(hole, </span><span style="color:#bf616a;">MiB</span><span style="color:#c0c5ce;">(</span><span style="color:#d08770;">2</span><span style="color:#c0c5ce;">));
+		hole_end = hole + arm64_mem.</span><span style="color:#bf616a;">text_offset </span><span style="color:#c0c5ce;">+ arm64_mem.</span><span style="color:#bf616a;">image_size</span><span style="color:#c0c5ce;">;
+</span></code></pre>
+<p>这里第二行做这个对齐操作是因为ARM64启动协议要求内核被放置在一个2M对齐的内存区域上。</p>
+<h2 id="nei-he-ji-zhi">内核机制</h2>
+<p>flags中最后一位是<code>KEXEC_ON_CRASH</code>，有无这个flags会严格区分两个code path。由于我们分析kexec的目的是理解kdump的实现机制，因此从<code>KEXEC_ON_CRASH</code>入手进行分析。</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#b48ead;">extern struct</span><span style="color:#c0c5ce;"> kimage *kexec_image;
+</span><span style="color:#b48ead;">extern struct</span><span style="color:#c0c5ce;"> kimage *kexec_crash_image;
+</span></code></pre>
+<p>内核使用kimage表示一个在内核中的镜像。使用<code>KEXEC_ON_CRASH</code>时，操作的是<code>kexec_crash_image</code>。当<code>kexec_load</code>系统调用传入的<code>nr_segments</code>参数为0时，内核会卸载掉对应的系统镜像。</p>
+<h3 id="kexec-segment">kexec_segment</h3>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#b48ead;">struct </span><span style="color:#c0c5ce;">kexec_segment {
+	</span><span style="color:#65737e;">/*
+	 * This pointer can point to user memory if kexec_load() system
+	 * call is used or will point to kernel memory if
+	 * kexec_file_load() system call is used.
+	 *
+	 * Use -&gt;buf when expecting to deal with user memory and use -&gt;kbuf
+	 * when expecting to deal with kernel memory.
+	 */
+	</span><span style="color:#b48ead;">union </span><span style="color:#c0c5ce;">{
+		</span><span style="color:#b48ead;">void</span><span style="color:#c0c5ce;"> __user *buf;
+		</span><span style="color:#b48ead;">void </span><span style="color:#c0c5ce;">*kbuf;
+	};
+	size_t bufsz;
+	</span><span style="color:#b48ead;">unsigned long</span><span style="color:#c0c5ce;"> mem;
+	size_t memsz;
+};
+</span></code></pre>
+<p>这个结构体是kexec_load系统调用传入的主要参数之一，总共有两个形态。在<code>kexec_load</code>中，第一个字段为用户态地址，而在<code>kexec_file_load</code>中，其第一个字段为内核地址。</p>
+<p>从<code>kimage_load_crash_segment</code>中可以看到，内核对这个结构体的主要处理是将由前两个参数指定的缓冲区的内容复制到由后两个参数指定的物理内存区域中。</p>
+<h3 id="do-kexec-load">do_kexec_load</h3>
+<ul>
+<li>申请新的kimage</li>
+<li>拷贝vmcore_info到新申请的page里(应该不是真的vmcore而是某种指针性质的东西)</li>
+<li>调用<code>kimage_load_crash_segment</code>将kexec_segment中指定的buffer拷贝到对应物理内存区域中</li>
+</ul>
+<p>image_terminate ? TODO</p>
+<p>kimage_entry_t kimage-&gt;head</p>
+<h3 id="kimage-entry-t">kimage_entry_t</h3>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#b48ead;">struct </span><span style="color:#c0c5ce;">kimage {
+	kimage_entry_t head;
+	kimage_entry_t *entry;
+	kimage_entry_t *last_entry;
+    ...
+};
+</span></code></pre>
+<p>kimage结构体的开头三个字段是<code>kimage_entry_t</code>类型的数据。该类型为一个指针类型（unsigned long），但是利用了一个trick，使用指针的低位保存特定flags。该指针的高位应该是用来保存一个page的物理地址。</p>
+<p><code>kimage_entry_t</code>实际上在crash模式下的kimage中是没有被用到的，但是最后调用cpu_soft_reset时需要将<code>kimage-&gt;head</code>传入当作一个参数，后续读这段汇编代码时需要深入分析。先看初始化代码：</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#c0c5ce;">	image-&gt;head = </span><span style="color:#d08770;">0</span><span style="color:#c0c5ce;">;
+	image-&gt;entry = &amp;image-&gt;head;
+	image-&gt;last_entry = &amp;image-&gt;head
+</span></code></pre>
+<p>上面为<code>do_kimage_alloc_init</code>函数中用于初始化这三个字段操作。首先明确这几个字段正常使用时分别保存了什么：</p>
+<ul>
+<li>head保存申请的内存区域第一个page的物理地址（物理地址）</li>
+<li>entry是指向当前保存的最后一个entry的指针（虚拟地址）</li>
+<li>last_entry指向申请的内存区域的最后一个entry位置（虚拟地址）</li>
+</ul>
+<p>这里可以看到head设置为0，表示这块内存区域还没有申请。后续可以看到，在向kimage增加entry时（kimage_add_entry），会检查是否申请了内存区域，如果没有则进行申请：</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#c0c5ce;">	</span><span style="color:#b48ead;">if </span><span style="color:#c0c5ce;">(image-&gt;entry == image-&gt;last_entry) {
+		kimage_entry_t *ind_page;
+		</span><span style="color:#b48ead;">struct</span><span style="color:#c0c5ce;"> page *page;
+
+		page = </span><span style="color:#bf616a;">kimage_alloc_page</span><span style="color:#c0c5ce;">(image, GFP_KERNEL, KIMAGE_NO_DEST);
+		</span><span style="color:#b48ead;">if </span><span style="color:#c0c5ce;">(!page)
+			</span><span style="color:#b48ead;">return </span><span style="color:#c0c5ce;">-ENOMEM;
+
+		ind_page = </span><span style="color:#bf616a;">page_address</span><span style="color:#c0c5ce;">(page);
+		*image-&gt;entry = </span><span style="color:#bf616a;">virt_to_boot_phys</span><span style="color:#c0c5ce;">(ind_page) | IND_INDIRECTION;
+		image-&gt;entry = ind_page;
+		image-&gt;last_entry = ind_page +
+				      ((PAGE_SIZE/sizeof(kimage_entry_t)) - </span><span style="color:#d08770;">1</span><span style="color:#c0c5ce;">);
+	}
+</span></code></pre>
+<p>这里尚没有分析这些entry的作用，但是可以确认在crash模式下的kexec并不会使用他们，而是直接使用<code>kimage_terminate</code>标记entry的结尾。后续需要分析普通模式下的kexec时，再做分析。</p>
+<h3 id="crash-kexec">__crash_kexec</h3>
+<p><code>__crash_kexec</code>函数是kdump的入口函数，在内核调用panic函数时被调用。</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#bf616a;">__crash_kexec</span><span style="color:#c0c5ce;">(</span><span style="color:#d08770;">NULL</span><span style="color:#c0c5ce;">);
+</span></code></pre>
+<p>函数看着比较简单：</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#c0c5ce;">		</span><span style="color:#b48ead;">if </span><span style="color:#c0c5ce;">(kexec_crash_image) {
+			</span><span style="color:#b48ead;">struct</span><span style="color:#c0c5ce;"> pt_regs fixed_regs;
+
+			</span><span style="color:#bf616a;">crash_setup_regs</span><span style="color:#c0c5ce;">(&amp;fixed_regs, regs);
+			</span><span style="color:#bf616a;">crash_save_vmcoreinfo</span><span style="color:#c0c5ce;">();
+			</span><span style="color:#bf616a;">machine_crash_shutdown</span><span style="color:#c0c5ce;">(&amp;fixed_regs);
+			</span><span style="color:#bf616a;">machine_kexec</span><span style="color:#c0c5ce;">(kexec_crash_image);
+		}
+</span></code></pre>
+<p>首先检查capture kernel是否已经装载，这是后续操作可以进行的前提。<code>crash_setup_regs</code>函数是一段简单的内联汇编，在其第二个参数为NULL时会dump下来当前寄存器的状态。<code>crash_save_vmcoreinfo</code>函数将前面的vmcoreinfo保存下来。<code>machine_crash_shutdown</code>函数会暂停所有CPU的执行，并dump下其寄存器状态。最后<code>machine_kexec</code>函数真正执行kexec的功能，启动crash内核。</p>
+<h3 id="machine-kexec">machine_kexec</h3>
+<p>前面可以看到，装载crash内核时，申请了一个<code>control_code_page</code>。内核在进行kexec操作时，需要尽量不要破坏原有内核的环境，这个control_code_page实质上就是在原先预留出的内存空间中申请出来的page，用于保存relocate内核操作的函数代码。我们可以看到如下操作：</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#c0c5ce;">	reboot_code_buffer_phys = </span><span style="color:#bf616a;">page_to_phys</span><span style="color:#c0c5ce;">(kimage-&gt;control_code_page);
+	reboot_code_buffer = </span><span style="color:#bf616a;">phys_to_virt</span><span style="color:#c0c5ce;">(reboot_code_buffer_phys);
+	
+	</span><span style="color:#bf616a;">memcpy</span><span style="color:#c0c5ce;">(reboot_code_buffer, arm64_relocate_new_kernel, arm64_relocate_new_kernel_size);
+</span></code></pre>
+<p>该函数实现在<code>./arch/arm64/kernel/relocate_kernel.S</code>文件中。在完成一些缓存与flags操作之后，重置cpu：</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#c0c5ce;">	</span><span style="color:#bf616a;">cpu_soft_restart</span><span style="color:#c0c5ce;">(reboot_code_buffer_phys, kimage-&gt;head, kimage-&gt;start, </span><span style="color:#d08770;">0</span><span style="color:#c0c5ce;">);
+</span></code></pre><h3 id="cpu-soft-restart">cpu_soft_restart</h3>
+<p>该函数工作本质上由<code>__cpu_soft_restart</code>完成。只不过需要将内核的page table还原成idmap（identity map）状态。可以明确entry参数为前面的<code>reboot_code_buffer_phys</code>即保存了<code>arm64_relocate_new_kernel</code>代码的一个page。剩余部分需要分析汇编代码，当然只看不写的话汇编代码也是比较简单的。</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#8fa1b3;">ENTRY(__cpu_soft_restart)
+	/</span><span style="color:#c0c5ce;">* </span><span style="color:#8fa1b3;">Clear sctlr_el1 </span><span style="color:#bf616a;">flags</span><span style="color:#8fa1b3;">. </span><span style="color:#c0c5ce;">*</span><span style="color:#8fa1b3;">/
+	mrs	x12</span><span style="color:#c0c5ce;">, </span><span style="color:#8fa1b3;">sctlr_el1
+	ldr	x13</span><span style="color:#c0c5ce;">, </span><span style="color:#8fa1b3;">=SCTLR_ELx_FLAGS
+	bic	x12</span><span style="color:#c0c5ce;">, </span><span style="color:#8fa1b3;">x12</span><span style="color:#c0c5ce;">, </span><span style="color:#8fa1b3;">x13
+	pre_disable_mmu_workaround
+	msr	sctlr_el1</span><span style="color:#c0c5ce;">, </span><span style="color:#8fa1b3;">x12
+	isb
+
+	cbz	x0</span><span style="color:#c0c5ce;">, </span><span style="color:#8fa1b3;">1f				// el2_switch?
+	</span><span style="color:#b48ead;">mov	</span><span style="color:#8fa1b3;">x0</span><span style="color:#c0c5ce;">, </span><span style="color:#8fa1b3;">#HVC_SOFT_RESTART
+	hvc	#</span><span style="color:#d08770;">0				</span><span style="color:#8fa1b3;">// no return
+
+</span><span style="color:#d08770;">1</span><span style="color:#8fa1b3;">:	</span><span style="color:#b48ead;">mov	</span><span style="color:#8fa1b3;">x18</span><span style="color:#c0c5ce;">, </span><span style="color:#8fa1b3;">x1				// entry
+	</span><span style="color:#b48ead;">mov	</span><span style="color:#8fa1b3;">x0</span><span style="color:#c0c5ce;">, </span><span style="color:#8fa1b3;">x2				// arg0
+	</span><span style="color:#b48ead;">mov	</span><span style="color:#8fa1b3;">x1</span><span style="color:#c0c5ce;">, </span><span style="color:#8fa1b3;">x3				// arg1
+	</span><span style="color:#b48ead;">mov	</span><span style="color:#8fa1b3;">x2</span><span style="color:#c0c5ce;">, </span><span style="color:#8fa1b3;">x4				// arg2
+	br	x18
+ENDPROC(__cpu_soft_restart)
+</span></code></pre>
+<p>这里首先注意<code>.pushsection    .idmap.text, &quot;awx&quot;</code>指令，他将这个函数放置名为<code>.idmap.text</code>的section中，并将其内存属性设置可分配，可写与可执行。函数开头将SCTRL_EL1上的M，A，C，SA，I位清除：</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#b48ead;">#define </span><span style="color:#c0c5ce;">SCTLR_ELx_FLAGS	(SCTLR_ELx_M | SCTLR_ELx_A | SCTLR_ELx_C | \
+			 SCTLR_ELx_SA | SCTLR_ELx_I)
+</span></code></pre>
+<p>即关闭命令与数据缓存，关闭对齐检查与栈对齐检查，关闭MMU。然后用isb命令清空指令cache。后面这个调用hvc的code path这里不分析，后续需要结合异常处理代码分析。最后函数将参数保存至x0，x1，x2然后跳转到entry（即前面的arm64_relocate_new_kernel）执行。</p>
+<h3 id="arm64-relocate-new-kernel">arm64_relocate_new_kernel</h3>
+<p>该函数由汇编写成。先总结一个结论，对于crash模式下的kexec，函数基本不执行任何操作，仅仅是清除<code>SCTLR_ELx_FLAGS</code>然后跳转到<code>kimage-&gt;start</code>然后开始执行，跳转时x0-x3参数的值都为0。为了更明确其行为，帮助理解普通kexec下进行的操作，有必要分析这个函数。前面提到函数开头会检测当前是否处于EL2，如果是则会清除对应的flags：</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#8fa1b3;">	/</span><span style="color:#c0c5ce;">* </span><span style="color:#8fa1b3;">Clear the sctlr_el2 </span><span style="color:#bf616a;">flags</span><span style="color:#8fa1b3;">. </span><span style="color:#c0c5ce;">*</span><span style="color:#8fa1b3;">/
+	mrs	x0</span><span style="color:#c0c5ce;">, </span><span style="color:#8fa1b3;">CurrentEL
+	</span><span style="color:#b48ead;">cmp	</span><span style="color:#8fa1b3;">x0</span><span style="color:#c0c5ce;">, </span><span style="color:#8fa1b3;">#CurrentEL_EL2
+	b.ne	1f
+	mrs	x0</span><span style="color:#c0c5ce;">, </span><span style="color:#8fa1b3;">sctlr_el2
+	ldr	x1</span><span style="color:#c0c5ce;">, </span><span style="color:#8fa1b3;">=SCTLR_ELx_FLAGS
+	bic	x0</span><span style="color:#c0c5ce;">, </span><span style="color:#8fa1b3;">x0</span><span style="color:#c0c5ce;">, </span><span style="color:#8fa1b3;">x1
+	pre_disable_mmu_workaround
+	msr	sctlr_el2</span><span style="color:#c0c5ce;">, </span><span style="color:#8fa1b3;">x0
+	isb
+</span><span style="color:#d08770;">1</span><span style="color:#8fa1b3;">:
+</span></code></pre>
+<p>函数之后处理kimage-&gt;head，看到这里明白<code>kimage-&gt;head</code>实际上是新kernel进行relocation所需的信息。当然对于crash模式下的kexec来说，<code>kimage-&gt;head</code>是IND_DONE，loop会直接跳出。</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#8fa1b3;">	/</span><span style="color:#c0c5ce;">* </span><span style="color:#8fa1b3;">Check if the new image needs relocation. </span><span style="color:#c0c5ce;">*</span><span style="color:#8fa1b3;">/
+	tbnz	x16</span><span style="color:#c0c5ce;">, </span><span style="color:#8fa1b3;">IND_DONE_BIT</span><span style="color:#c0c5ce;">, </span><span style="color:#8fa1b3;">.Ldone
+</span></code></pre>
+<p>loop在循环时会检查entry里flags的值：</p>
+<ul>
+<li>IND_DESTINATION：将entry里的page地址设置为拷贝时的目标地址dest</li>
+<li>IND_INDIRECTION：循环在遇到这个标志时，会从entry指向的page里读取新的entry。这样可以实现多buffer保存entry</li>
+<li>IND_SOURCE：循环遇到这个标志时，会把entry指向的page整个复制到dest指向的page，并将dest的值自增指向dest向后的下个page</li>
+<li>IND_DONE: 循环读到这个flag时，会退出执行</li>
+</ul>
+<p>loop处理完毕时，新内核的relocation也完成了，函数在刷新完缓存后跳转到<code>kimage-&gt;start</code>进行执行。</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#8fa1b3;">	/</span><span style="color:#c0c5ce;">* </span><span style="color:#8fa1b3;">Start new image. </span><span style="color:#c0c5ce;">*</span><span style="color:#8fa1b3;">/
+	</span><span style="color:#b48ead;">mov	</span><span style="color:#8fa1b3;">x0</span><span style="color:#c0c5ce;">, </span><span style="color:#8fa1b3;">xzr
+	</span><span style="color:#b48ead;">mov	</span><span style="color:#8fa1b3;">x1</span><span style="color:#c0c5ce;">, </span><span style="color:#8fa1b3;">xzr
+	</span><span style="color:#b48ead;">mov	</span><span style="color:#8fa1b3;">x2</span><span style="color:#c0c5ce;">, </span><span style="color:#8fa1b3;">xzr
+	</span><span style="color:#b48ead;">mov	</span><span style="color:#8fa1b3;">x3</span><span style="color:#c0c5ce;">, </span><span style="color:#8fa1b3;">xzr
+	br	x17
+</span></code></pre>
+    </div>
+
+    
+    
+
+    <div class="post-footer">
+        
+            
+                <div class="post-tags">
+                    
+                        <a href="https:&#x2F;&#x2F;crab2313.github.io&#x2F;tags&#x2F;kernel&#x2F;">#kernel</a>
+                    
+                        <a href="https:&#x2F;&#x2F;crab2313.github.io&#x2F;tags&#x2F;kdump&#x2F;">#kdump</a>
+                    
+                </div>
+            
+            
+                <div class="post-nav">
+                    
+                        <a class="previous" href="https:&#x2F;&#x2F;crab2313.github.io&#x2F;bus-and-driver&#x2F;">‹ Linux设备模型：bus与driver</a>
+                    
+                    
+                        <a class="next" href="https:&#x2F;&#x2F;crab2313.github.io&#x2F;pci&#x2F;">PCI驱动框架分析 ›</a>
+                    
+                    
+                    
+                </div>
+            
+
+        
+
+    </div>
+
+    
+    
+</article>
+
+
+                </div>
+            </main>
+
+            
+            
+        </div>
+
+      
+          <script type="text/javascript" src="https:&#x2F;&#x2F;crab2313.github.io&#x2F;even.js" ></script>
+      
+    </body>
+
+</html>

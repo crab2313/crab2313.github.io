@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+      <meta http-equiv="X-UA-Compatible" content="IE=edge">
+      <meta http-equiv="content-type" content="text/html; charset=utf-8">
+
+      <!-- Enable responsiveness on mobile devices-->
+      <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+
+      <title>crab2313&#x27;s blog - Floyd循环检测算法</title>
+
+      
+        <link rel="alternate" type="application/atom+xml" title="RSS" href="https://crab2313.github.io/atom.xml">
+      
+
+      
+          <script src="https://cdnjs.cloudflare.com/ajax/libs/slideout/1.0.1/slideout.min.js"></script>
+          
+      
+
+      
+          <link rel="stylesheet" href="https:&#x2F;&#x2F;crab2313.github.io&#x2F;site.css">
+          
+      
+
+      
+      
+    </head>
+
+    <body>
+        <div class="container">
+
+            <div id="mobile-navbar" class="mobile-navbar">
+              <div class="mobile-header-logo">
+                <a href="/" class="logo">crab2313&#x27;s blog</a>
+              </div>
+              <div class="mobile-navbar-icon icon-out">
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
+            </div>
+
+            <nav id="mobile-menu" class="mobile-menu slideout-menu slideout-menu-left">
+              <ul class="mobile-menu-list">
+                
+                    <li class="mobile-menu-item">
+                        <a href="https:&#x2F;&#x2F;crab2313.github.io">
+                            Home
+                        </a>
+                    </li>
+                
+                    <li class="mobile-menu-item">
+                        <a href="https:&#x2F;&#x2F;crab2313.github.io&#x2F;tags">
+                            Tags
+                        </a>
+                    </li>
+                
+                    <li class="mobile-menu-item">
+                        <a href="https:&#x2F;&#x2F;github.com&#x2F;crab2313">
+                            Github
+                        </a>
+                    </li>
+                
+              </ul>
+            </nav>
+
+            <header id="header">
+                <div class="logo"><a href="https:&#x2F;&#x2F;crab2313.github.io">crab2313&#x27;s blog</a></div>
+                <nav class="menu">
+                    <ul>
+                        
+                            <li>
+                                <a href="https:&#x2F;&#x2F;crab2313.github.io">
+                                    Home
+                                </a>
+                            </li>
+                        
+                            <li>
+                                <a href="https:&#x2F;&#x2F;crab2313.github.io&#x2F;tags">
+                                    Tags
+                                </a>
+                            </li>
+                        
+                            <li>
+                                <a href="https:&#x2F;&#x2F;github.com&#x2F;crab2313">
+                                    Github
+                                </a>
+                            </li>
+                        
+                    </ul>
+                </nav>
+            </header>
+
+            <main>
+                <div class="content" id="mobile-panel">
+                    
+
+
+<div class="post-toc" id="post-toc">
+    <h2 class="post-toc-title">Contents</h2>
+    <div class="post-toc-content always-active">
+        <nav id="TableOfContents">
+            <ul>
+                
+                <li>
+                    <a href="https://crab2313.github.io/floyd-cycle-detection/#xun-huan-jian-ce-wen-ti" class="toc-link">循环检测问题</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://crab2313.github.io/floyd-cycle-detection/#floydxun-huan-jian-ce-suan-fa" class="toc-link">Floyd循环检测算法</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://crab2313.github.io/floyd-cycle-detection/#wen-ti-yi-jian-ce-xun-huan-shi-fou-cun-zai" class="toc-link">问题一：检测循环是否存在</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://crab2313.github.io/floyd-cycle-detection/#wen-ti-er-xun-huan-suo-zai-de-wei-zhi" class="toc-link">问题二：循环所在的位置</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://crab2313.github.io/floyd-cycle-detection/#wen-ti-san-xun-huan-de-chang-du" class="toc-link">问题三：循环的长度</a>
+                    
+                </li>
+                
+            </ul>
+        </nav>
+    </div>
+</div>
+
+
+<article class="post">
+    
+    <header class="post__header">
+        <h1 class="post__title">
+            <a href="https:&#x2F;&#x2F;crab2313.github.io&#x2F;floyd-cycle-detection&#x2F;">Floyd循环检测算法</a>
+        </h1>
+        <div class="post__meta">
+            <span class="post__time">2016-04-25</span>
+            
+        </div>
+    </header>
+
+    <div class="post-content">
+      <h1 id="xun-huan-jian-ce-wen-ti">循环检测问题</h1>
+<p>在研究抽象代数的时候，很多教材都是从欧拉研究的循环群入手的，比如这本《Advanced Modern Algebra》。</p>
+<p>当然，直接讨论数学有些扯远了，我们并不需要群论知识，锦上添花而已。考虑一个由连续自然数组成的集合M， 它由0到n-1的自然数组成，然后考虑一个映射f，它将M映射到它自身，亦即我们定义操作f。</p>
+<p>由于f将M映射到M，对每个e∈M,f(e)总是有定义的，我们可以将某个元素e多次进行f操作。现在我们来考虑靠考虑这样做会发生什么？很显然，这样的操作会形成一个链条装的结构，比如映射<code>f(e) = (e + 1) %  n</code>，取初始数据为0，n = 4，则可以得到：</p>
+<pre style="background-color:#2b303b;">
+<code>0 -&gt; 1 -&gt; 2 -&gt; 3 -&gt; 1 -&gt; 2 -&gt; 3 -&gt; ...
+</code></pre>
+<p>很显然我们得到了一个循环。一旦这个映射中存在循环，而我们不凑巧掉了进去，就出不来了。</p>
+<p>所以循环检测问题就是如何确定这样的循环是否存在？这个循环的长度？它相对与初始元素的位置？以映射的说法可能不够通俗，但是是最贴近数学的方式，同时也告诉我们这种问题的模型可以应用于多种现实情形。我们可以换一个角度思考，既然映射可以看作链式结构，我们也可以显式的使用链表来模拟这种情形。亦即问题可以转换为给出一个单链表，如何检测链表中是否有这样的循环？</p>
+<h1 id="floydxun-huan-jian-ce-suan-fa">Floyd循环检测算法</h1>
+<p>Floyd算法是众多循环检测算法中的一员，它的思想比较简单易懂，运用了快慢指针，现在来分析分析它的原理。</p>
+<p>由与我们的问题分成三个子问题，Floyd循环检测算法也分成三个主要步骤，这三个步骤分别对应三个问题。</p>
+<h1 id="wen-ti-yi-jian-ce-xun-huan-shi-fou-cun-zai">问题一：检测循环是否存在</h1>
+<p>这个问题是最主要的问题，为了解决这样的问题，我们将映射抽象成一个单链表，即每个链表只存在一个后继。定义两个指针<code>fast</code>和<code>slow</code>，这两个指针都指向我们链表中的一个元素，由于单链表有且只有一个后继，这两个指针可以单向的向后移。实际问题中，这个链表可能不是无限长的，它有结尾。我们将<code>fast</code>和<code>slow</code>指向链表第一个元素，<code>fast</code>每次向后移动两个元素，<code>slow</code>每次向后移动一个元素，如果链表中存在循环，那么这两个指针必会相遇。</p>
+<p>我们可以证明这两个指针为什么会相遇。假设<code>slow</code>移动了k，则<code>fast</code>移动了2k，显然它们的距离为k，设循环的长度为l（即有l个元素）。由于循环是从1开始增长的，显然必有k为l的倍数的时候。考虑两个指针相遇的条件：1.它们的距离为l的整数倍，2.它们都落在了循环里。由此不难得出它们一定会在循环里相遇。</p>
+<h1 id="wen-ti-er-xun-huan-suo-zai-de-wei-zhi">问题二：循环所在的位置</h1>
+<p>这个问题也可以表达成从初始位置向前走多少步可以到达循环的第一个元素。做法很简单，将<code>fast</code>指针移回初始位置，然后<code>slow</code>与<code>fast</code>都以步长为一的速度向前移动，它们相遇时<code>fast</code>移动的距离就是循环所在的位置u。我们来分析以下这是为什么：1.显然，它们的差由原来的<code>fast-slow=k</code>变为了<code>slow-fast=k</code>，并且由于<code>fast</code>与<code>slow</code>的移动速度开始变得相同，它们的距离永远都是k，而k又是l的倍数，所以只要<code>fast</code>和<code>slow</code>一起出现在这个循环里，它们肯定是指向同一个元素。由此<code>fast</code>与<code>slow</code>第一次相等的时候指向的肯定是在循环的第一个元素，亦即<code>fast</code>移动的距离就是不属于循环的元素个数。</p>
+<h1 id="wen-ti-san-xun-huan-de-chang-du">问题三：循环的长度</h1>
+<p>这个问题更加简单，既然我们已经确定了循环的存在，并且此时<code>fast</code>与<code>slow</code>都是指向循环开始时的第一个元素，我们需要移动<code>fast</code>和<code>slow</code>指针其中的一个，并固定另一个，直到两个指针所指向的元素再次相同，记录下指针移动的长度就是循环的长度。</p>
+
+    </div>
+
+    
+    
+
+    <div class="post-footer">
+        
+            
+                <div class="post-tags">
+                    
+                        <a href="https:&#x2F;&#x2F;crab2313.github.io&#x2F;tags&#x2F;algorithm&#x2F;">#algorithm</a>
+                    
+                </div>
+            
+            
+                <div class="post-nav">
+                    
+                    
+                        <a class="next" href="https:&#x2F;&#x2F;crab2313.github.io&#x2F;eventfd&#x2F;">eventfd在内核中的实现 ›</a>
+                    
+                    
+                    
+                </div>
+            
+
+        
+
+    </div>
+
+    
+    
+</article>
+
+
+                </div>
+            </main>
+
+            
+            
+        </div>
+
+      
+          <script type="text/javascript" src="https:&#x2F;&#x2F;crab2313.github.io&#x2F;even.js" ></script>
+      
+    </body>
+
+</html>

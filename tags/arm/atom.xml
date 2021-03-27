@@ -1,0 +1,312 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en">
+	<title>crab2313&#x27;s blog - arm</title>
+	<link href="https://crab2313.github.io/tags/arm/atom.xml" rel="self" type="application/atom+xml"/>
+  <link href="https://crab2313.github.io"/>
+	<generator uri="https://www.getzola.org/">Zola</generator>
+	<updated>2020-02-20T00:00:00+00:00</updated>
+	<id>https://crab2313.github.io/tags/arm/atom.xml</id>
+	<entry xml:lang="en">
+		<title>SMMU内核驱动分析</title>
+		<published>2020-02-20T00:00:00+00:00</published>
+		<updated>2020-02-20T00:00:00+00:00</updated>
+		<link href="https://crab2313.github.io/smmu/" type="text/html"/>
+		<id>https://crab2313.github.io/smmu/</id>
+		<content type="html">&lt;h1 id=&quot;iommuhe-xin-kuang-jia-ceng&quot;&gt;IOMMU核心框架层&lt;&#x2F;h1&gt;
+&lt;p&gt;IOMMU核心框架是管理IOMMU设备的一个通过框架，IOMMU设备通过实现特定的回调函数并将自身注册到IOMMU核心框架中，以此通过IOMMU核心框架提供的API向整个内核提供IOMMU功能。所有的IOMMU设备都嵌入了一个&lt;code&gt;struct iommu_device&lt;&#x2F;code&gt;，iommu的核心代码只会操作这个结构体。可以看到，我们唯一需要关心的就是ops，这是iommu驱动注册到core中的回调函数。:&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;iommu_device {
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; list_head list;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;const struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;iommu_ops *ops;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;fwnode_handle *fwnode;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;device *dev;
+};
+
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#65737e;&quot;&gt;&#x2F;**
+ * struct iommu_ops - iommu ops and capabilities
+ * @capable: check capability
+ * @domain_alloc: allocate iommu domain
+ * @domain_free: free iommu domain
+ * @attach_dev: attach device to an iommu domain
+ * @detach_dev: detach device from an iommu domain
+ * @map: map a physically contiguous memory region to an iommu domain
+ * @unmap: unmap a physically contiguous memory region from an iommu domain
+ * @flush_tlb_all: Synchronously flush all hardware TLBs for this domain
+ * @tlb_range_add: Add a given iova range to the flush queue for this domain
+ * @tlb_sync: Flush all queued ranges from the hardware TLBs and empty flush
+ *            queue
+ * @iova_to_phys: translate iova to physical address
+ * @add_device: add device to iommu grouping
+ * @remove_device: remove device from iommu grouping
+ * @device_group: find iommu group for a particular device
+ * @domain_get_attr: Query domain attributes
+ * @domain_set_attr: Change domain attributes
+ * @get_resv_regions: Request list of reserved regions for a device
+ * @put_resv_regions: Free list of reserved regions for a device
+ * @apply_resv_region: Temporary helper call-back for iova reserved ranges
+ * @domain_window_enable: Configure and enable a particular window for a domain
+ * @domain_window_disable: Disable a particular window for a domain
+ * @domain_set_windows: Set the number of windows for a domain
+ * @domain_get_windows: Return the number of windows for a domain
+ * @of_xlate: add OF master IDs to iommu grouping
+ * @pgsize_bitmap: bitmap of all possible supported page sizes
+ *&#x2F;
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;iommu中的核心代码在&lt;code&gt;drivers&#x2F;iommu&#x2F;iommu.c&lt;&#x2F;code&gt;中实现，下面从一些基本的方面分析核心层提供的功能。由于一个运行的系统中只会同时存在几个iommu设备，因此设备管理实现比较简单，是由链表实现的。&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;static &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;LIST_HEAD&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(iommu_device_list);
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;static &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;DEFINE_SPINLOCK&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(iommu_device_lock);
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;注册和注销设备实质上就是操作这个链表。iommu向外提供的API不多，后面主要分析：&lt;&#x2F;p&gt;
+&lt;ul&gt;
+&lt;li&gt;iommu_map &amp;amp;&amp;amp; iommu_unmap&lt;&#x2F;li&gt;
+&lt;li&gt;iommu_domain_alloc &amp;amp;&amp;amp; iommu_domain_free&lt;&#x2F;li&gt;
+&lt;li&gt;iommu_attach_device &amp;amp;&amp;amp; iommu_detach_device&lt;&#x2F;li&gt;
+&lt;&#x2F;ul&gt;
+&lt;h2 id=&quot;iommu-domain-alloc&quot;&gt;iommu_domain_alloc&lt;&#x2F;h2&gt;
+&lt;p&gt;在我的理解中，domain这个词是从intel的VT-d文档中继承下来的，其他平台有各自的叫法如ARM下叫context。一个domain应该是指一个独立的iommu映射上下文。处于同一个domain中的设备使用同一套映射做地址转换（对于mmio来说就是独立的页表）。core层中使用&lt;code&gt;struct iommu_domain&lt;&#x2F;code&gt;表示一个domain：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;iommu_domain {
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;unsigned&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; type;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;const struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;iommu_ops *ops;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;unsigned long&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; pgsize_bitmap;	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#65737e;&quot;&gt;&#x2F;* Bitmap of page sizes in use *&#x2F;
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;	iommu_fault_handler_t handler;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;void &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;*handler_token;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; iommu_domain_geometry geometry;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;void &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;*iova_cookie;
+};
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;后面分析各个字段的含义。注释中提到了内核支持的domain类型：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#65737e;&quot;&gt;&#x2F;*
+ * This are the possible domain-types
+ *
+ *	IOMMU_DOMAIN_BLOCKED	- All DMA is blocked, can be used to isolate
+ *				  devices
+ *	IOMMU_DOMAIN_IDENTITY	- DMA addresses are system physical addresses
+ *	IOMMU_DOMAIN_UNMANAGED	- DMA mappings managed by IOMMU-API user, used
+ *				  for VMs
+ *	IOMMU_DOMAIN_DMA	- Internally used for DMA-API implementations.
+ *				  This flag allows IOMMU drivers to implement
+ *				  certain optimizations for these domain
+ *&#x2F;
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;这个函数仅仅就是调用ops中驱动注册的&lt;code&gt;domain_alloc&lt;&#x2F;code&gt;回调函数分配一个iommu_domain，从这里看书每个驱动也是要提供自己的domain类型并把&lt;code&gt;struct iommu_domain&lt;&#x2F;code&gt;嵌入进取的。&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;iommu-attach-device&quot;&gt;iommu_attach_device&lt;&#x2F;h2&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;int &lt;&#x2F;span&gt;&lt;span style=&quot;color:#8fa1b3;&quot;&gt;iommu_attach_device&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; iommu_domain *&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;domain&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;, &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; device *&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;dev&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;);
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;从函数原型中可以看出该函数的操作对象是一个domain和一个设备，联想函数名称可以认为该函数是将一个设备添加到一个domain中。但事实上还是有些偏差的，该函数实际上将设备所在的Group与该domain绑定。值得一提的是，如果函数发现设备存在的Group中存在多个设备，则不进行绑定操作。总结下来，该操作针对独立设备（即所在Group里只有自己），将设备所在Group与domain进行绑定。&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;if &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;iommu_group_device_count&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(group) != &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;1&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;)
+		&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;goto&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; out_unlock;
+
+	ret = &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;__iommu_attach_group&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(domain, group);
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;&lt;code&gt;__iommu_attach_group&lt;&#x2F;code&gt;遍历Group中所有的设备，并调用&lt;code&gt;__iommu_attach_device&lt;&#x2F;code&gt;。该函数首先通过&lt;code&gt;domain-&amp;gt;ops&lt;&#x2F;code&gt;中的is_attach_deffered检查是否延后进行attach操作。然后调用ops中的attach_dev函数将设备绑定到该domain中去。这里需要注意区分Group中default_domain和domain的概念：domain指group当前所在的domain，而default_domain指Group默认应该在的domain。进行attach操作时，会检查default_domain是否与domain相同，以此判断该Group是否已经attach到别的domain上了，在该情况下返回&lt;code&gt;-EBUSY&lt;&#x2F;code&gt;。&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;iommu-detach-device&quot;&gt;iommu_detach_device&lt;&#x2F;h2&gt;
+&lt;p&gt;该函数与上面的&lt;code&gt;iommu_attach_device&lt;&#x2F;code&gt;几乎完全相反，并且该函数也是操作独立设备。这里注意如果Group有自己的default_domain，那么该函数在detach完成之后会重新attach到default_domain上。&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;iommu-map&quot;&gt;iommu_map&lt;&#x2F;h2&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;int &lt;&#x2F;span&gt;&lt;span style=&quot;color:#8fa1b3;&quot;&gt;iommu_map&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; iommu_domain *&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;domain&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;, &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;unsigned long &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;iova&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;,
+	      phys_addr_t &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;paddr&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;, size_t &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;size&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;, &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;int &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;prot&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;);
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;函数原型上可以看出来是用于映射domain内的iova，将长度为&lt;code&gt;size&lt;&#x2F;code&gt;以&lt;code&gt;iova&lt;&#x2F;code&gt;为起始地址的iova区域映射到以paddr为起始地址的物理地址。该函数只能用于&lt;code&gt;UNMANAGED&lt;&#x2F;code&gt;类型和&lt;code&gt;DMA&lt;&#x2F;code&gt;类型的domain。&lt;code&gt;domain-&amp;gt;pgsize_bitmap&lt;&#x2F;code&gt;是一个bitmap，用于记录domain支持的最小page大小。iommu_map函数进行操作时，是以page为单位的，page大小不固定可以根据需要使用不同大小的page，在同一次iommu_map操作中也不要求page大小一致。最终一个page的映射是调用iommu-&amp;gt;ops中的map回调函数实现的。&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;iommu-iova-to-phys&quot;&gt;iommu_iova_to_phys&lt;&#x2F;h2&gt;
+&lt;p&gt;该函数调用&lt;code&gt;domain-&amp;gt;ops&lt;&#x2F;code&gt;中提供的&lt;code&gt;iova_to_phys&lt;&#x2F;code&gt;回调函数将iova转换成物理地址。&lt;&#x2F;p&gt;
+&lt;p&gt;TODO dma integration&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;iommu-group&quot;&gt;IOMMU Group&lt;&#x2F;h2&gt;
+&lt;p&gt;啃了两天PCIE协议，对IOMMU的Group概念也有了一定的理解。从内核角度来看Group是一组设备，是IOMMU可以辨别的最小单位，即IOMMU无法区分出一个Group中的设备。区分标准是什么呢，IO地址空间。以PCIE总线来举一个例子，我们知道PCIE是一个点对点的协议，如果一个多function设备挂到了一个不支持ACS的bridge下，那么这两个function可以通过该bridge进行通信。这样的通信直接由bridge进行转发而无需通过Root Complex，自然也就无需通过IOMMU。这种情况下，这两个function的IOVA无法完全通过IOMMU隔离开，所以他们需要分到同一个Group中。同一个Group的设备应该是公用一个domain的。&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;iommu_group {
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; kobject kobj;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;kobject *devices_kobj;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; list_head devices;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; mutex mutex;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; blocking_notifier_head notifier;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;void &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;*iommu_data;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;void &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(*iommu_data_release)(&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;void &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;*iommu_data);
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;char &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;*name;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;int&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; id;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;iommu_domain *default_domain;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;iommu_domain *domain;
+};
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;从iommu_group的结构中可以发现，devices列表保存group中设备。一个group需要关联两个iommu_domain，除此之外支持内核中其他组件向该group中注册listener。default_domain保存的是默认该设备应该位于的domain，而domain字段保存设备当前所在的domain。&lt;&#x2F;p&gt;
+&lt;h3 id=&quot;iommu-group-add-device&quot;&gt;iommu_group_add_device&lt;&#x2F;h3&gt;
+&lt;p&gt;该函数将一个设备加入一个Group，函数的主要操作如下：&lt;&#x2F;p&gt;
+&lt;ul&gt;
+&lt;li&gt;处理sysfs相关的事项，如建立iommu_group符号链接&lt;&#x2F;li&gt;
+&lt;li&gt;将设备的iommu_group字段设置为这个Group&lt;&#x2F;li&gt;
+&lt;li&gt;调用iommu_group_create_direct_mappings建立设备的iova映射&lt;&#x2F;li&gt;
+&lt;li&gt;将设备加入到Group内的list里&lt;&#x2F;li&gt;
+&lt;li&gt;通知所有注册到Group里的listener有设备加入&lt;&#x2F;li&gt;
+&lt;&#x2F;ul&gt;
+&lt;p&gt;TODO: iommu_group_create_direct_mappings&lt;&#x2F;p&gt;
+&lt;h3 id=&quot;iommu-group-get-for-dev&quot;&gt;iommu_group_get_for_dev&lt;&#x2F;h3&gt;
+&lt;p&gt;该函数获取一个设备所在的Group，如果设备不属于任何一个Group，则调用IOMMU驱动提供的&lt;code&gt;device_group&lt;&#x2F;code&gt;回调函数尝试进行获取。&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;	group = &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;iommu_group_get&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(dev);
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;if &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(group)
+		&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;return&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; group;
+
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;if &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(!ops)
+		&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;return &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;ERR_PTR&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(-EINVAL);
+
+	group = ops-&amp;gt;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;device_group&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(dev);
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;随后，为获取的Group设置domain，最后将设备加入Group。&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;if &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(!group-&amp;gt;default_domain) {
+		&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; iommu_domain *dom;
+
+		dom = &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;__iommu_domain_alloc&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(dev-&amp;gt;bus, iommu_def_domain_type);
+		&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;if &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(!dom &amp;amp;&amp;amp; iommu_def_domain_type != IOMMU_DOMAIN_DMA) {
+			&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;dev_warn&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(dev,
+				 &amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;failed to allocate default IOMMU domain of type &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;%u&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;; falling back to IOMMU_DOMAIN_DMA&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;&amp;quot;,
+				 iommu_def_domain_type);
+			dom = &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;__iommu_domain_alloc&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(dev-&amp;gt;bus, IOMMU_DOMAIN_DMA);
+		}
+
+		group-&amp;gt;default_domain = dom;
+		&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;if &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(!group-&amp;gt;domain)
+			group-&amp;gt;domain = dom;
+	}
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;&lt;h2 id=&quot;bus-integration&quot;&gt;Bus integration&lt;&#x2F;h2&gt;
+&lt;p&gt;每一个&lt;code&gt;struct device&lt;&#x2F;code&gt;中保存了一个&lt;code&gt;struct iommu_group&lt;&#x2F;code&gt;的指针，用以获取该设备处于的group。除此之外，内核需要其他方式将iommu功能集成到总线中。很明显，一个iommu设备是作用于一个或者多个总线上的，那么就需要一个自然的方式管理与iommu相关的功能。首先明确&lt;code&gt;struct bus&lt;&#x2F;code&gt;中存在一个iommu_ops用于保存当前bus上生效的iommu驱动注册的iommu_ops。同时可以根据这个指针是否为NULL确认这个bus中是否支持iommu功能。&lt;&#x2F;p&gt;
+&lt;p&gt;iommu核心框架中提供了&lt;code&gt;bus_set_iommu&lt;&#x2F;code&gt;函数，该函数可以被iommu驱动调用，用以将自身挂入到 对应总线中。函数中除了设置iommu_ops指针之外，还进行了两个工作：&lt;&#x2F;p&gt;
+&lt;ul&gt;
+&lt;li&gt;向bus中注册一个listener：对于bus上设备的插入与移除的设备，调用iommu_ops中对应的add_device和remove_device回调函数。对于bus接收到的其他设备事件（如bind，unbind等），则将其传播给该设备所处于的group中。&lt;&#x2F;li&gt;
+&lt;li&gt;对于bus中已经存在的设备，则挨个调用&lt;code&gt;add_device&lt;&#x2F;code&gt;将其纳入iommu的管辖，并设置其group&lt;&#x2F;li&gt;
+&lt;&#x2F;ul&gt;
+&lt;h3 id=&quot;iommu-fwspec&quot;&gt;iommu_fwspec&lt;&#x2F;h3&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;iommu_fwspec {
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;const struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;iommu_ops	*ops;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;fwnode_handle	*iommu_fwnode;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;void			&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;*iommu_priv;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;unsigned int&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;		num_ids;
+	u32			ids[&lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;1&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;];
+};
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;&lt;h2 id=&quot;iommu-domain&quot;&gt;IOMMU Domain&lt;&#x2F;h2&gt;
+&lt;p&gt;每一个domain即代表一个iommu映射地址空间，即一个page table。一个Group逻辑上是需要与domain进行绑定的，即一个Group中的所有设备都位于一个domain中。&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;iommu_domain {
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;unsigned&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; type;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;const struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;iommu_ops *ops;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;unsigned long&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; pgsize_bitmap;	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#65737e;&quot;&gt;&#x2F;* Bitmap of page sizes in use *&#x2F;
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;	iommu_fault_handler_t handler;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;void &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;*handler_token;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; iommu_domain_geometry geometry;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;void &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;*iova_cookie;
+};
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;&lt;h1 id=&quot;smmuying-jian-ji-qu-dong-fen-xi&quot;&gt;SMMU硬件及驱动分析&lt;&#x2F;h1&gt;
+&lt;p&gt;看代码要点：&lt;&#x2F;p&gt;
+&lt;ul&gt;
+&lt;li&gt;一定要看文档，SMMU是一个比较简单的设备，他的Spec只有300页&lt;&#x2F;li&gt;
+&lt;li&gt;fault分为global和context，global基本上就是smmu本身的一些fault，而context是smmu在进行地址转换时出现的fault&lt;&#x2F;li&gt;
+&lt;&#x2F;ul&gt;
+&lt;p&gt;开始分析代码，我认为需要从中断处理入手，这也是错误信息的入口。先看context fault的处理函数，代码不贴了基本就是打出相关的寄存器信息，没有什么参考意义。我认为有意义的地方是这个中断是怎么注册的，即驱动是如何管理io domain的。这就涉及通用的IOMMU框架代码了。&lt;&#x2F;p&gt;
+&lt;p&gt;可以发现&lt;code&gt;arm_smmu_attach_dev&lt;&#x2F;code&gt;函数中将一个设备添加到一个特定的iommu domain中。函数中调用&lt;code&gt;arm_smmu_init_domain_context&lt;&#x2F;code&gt;函数注册了这个中断。对于每一个&lt;code&gt;struct device&lt;&#x2F;code&gt;，其内部有一个&lt;code&gt;iommu_group&lt;&#x2F;code&gt;字段保存其所在的Group。&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;static struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; iommu_ops arm_smmu_ops = {
+	.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;capable		&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= arm_smmu_capable,
+	.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;domain_alloc		&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= arm_smmu_domain_alloc,
+	.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;domain_free		&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= arm_smmu_domain_free,
+	.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;attach_dev		&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= arm_smmu_attach_dev,
+	.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;map			&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= arm_smmu_map,
+	.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;unmap			&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= arm_smmu_unmap,
+	.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;flush_iotlb_all	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= arm_smmu_iotlb_sync,
+	.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;iotlb_sync		&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= arm_smmu_iotlb_sync,
+	.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;iova_to_phys		&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= arm_smmu_iova_to_phys,
+	.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;add_device		&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= arm_smmu_add_device,
+	.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;remove_device		&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= arm_smmu_remove_device,
+	.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;device_group		&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= arm_smmu_device_group,
+	.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;domain_get_attr	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= arm_smmu_domain_get_attr,
+	.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;domain_set_attr	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= arm_smmu_domain_set_attr,
+	.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;of_xlate		&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= arm_smmu_of_xlate,
+	.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;get_resv_regions	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= arm_smmu_get_resv_regions,
+	.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;put_resv_regions	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= arm_smmu_put_resv_regions,
+	.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;pgsize_bitmap		&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= -&lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;1&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;UL&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;, &lt;&#x2F;span&gt;&lt;span style=&quot;color:#65737e;&quot;&gt;&#x2F;* Restricted during device attach *&#x2F;
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;};
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;由于前面已经分析了IOMMU核心框架，熟悉了IOMMU核心框架如何与IOMMU驱动如何互动。这里分析流程即为以一个设备的IOMMU操作周期为基准分析SMMU驱动向IOMMU核心框架注册回调函数。&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;stream-mappingguan-li&quot;&gt;Stream Mapping管理&lt;&#x2F;h2&gt;
+&lt;p&gt;首先提及一些Spec中定义的名词：&lt;&#x2F;p&gt;
+&lt;ul&gt;
+&lt;li&gt;Steam翻译成中文是流的意思。在SMMU中特指Master设备向SMMU发起的请求流。StreamID即为SMMU用以辨别不同Stream用的编号，注意Stream和设备不是一一对应的关系。&lt;&#x2F;li&gt;
+&lt;li&gt;Stream Mapping在Spec中特指将StreamID映射到Stream Context（接近domain的概念）这一操作行为。&lt;&#x2F;li&gt;
+&lt;&#x2F;ul&gt;
+&lt;p&gt;代码中SME应该是&lt;code&gt;Stream Mapping Entry&lt;&#x2F;code&gt;的缩写。Spec中提及到三种Stream Mapping的方式，这里主要提及Stream Indexing&lt;code&gt;和&lt;&#x2F;code&gt;Stream Matching`两种。&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;arm-smmu-add-device&quot;&gt;arm_smmu_add_device&lt;&#x2F;h2&gt;
+&lt;p&gt;这个函数即为&lt;code&gt;add_device&lt;&#x2F;code&gt;回调函数。回忆前面的分析，IOMMU核心框架向bus中注册listener，每当bus中新增设备时，即会调用该函数。从这里看，该函数的主要功能就是将一个设备纳入到IOMMU驱动的管理中。该函数的核心参数就是被传入的&lt;code&gt;struct device&lt;&#x2F;code&gt;结构体中保存的&lt;code&gt;struct iommu_fwspec&lt;&#x2F;code&gt;。&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#65737e;&quot;&gt;&#x2F;**
+ * struct iommu_fwspec - per-device IOMMU instance data
+ * @ops: ops for this device&amp;#39;s IOMMU
+ * @iommu_fwnode: firmware handle for this device&amp;#39;s IOMMU
+ * @iommu_priv: IOMMU driver private data for this device
+ * @num_ids: number of associated device IDs
+ * @ids: IDs which this device may present to the IOMMU
+ *&#x2F;
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;iommu_fwspec {
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;const struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;iommu_ops	*ops;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;fwnode_handle	*iommu_fwnode;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;void			&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;*iommu_priv;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;unsigned int&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;		num_ids;
+	u32			ids[&lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;1&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;];
+};
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;该参数是从ACPI或者设备树中得到的，用以描述设备绑定的IOMMU及拓扑关系。这里需要注意该关系必须遵循硬件设计，不然很明显是无法正常工作的。函数为设备内分配了一个&lt;code&gt;arm_smmu_master_cfg&lt;&#x2F;code&gt;结构体，如下：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;arm_smmu_master_cfg {
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;arm_smmu_device		*smmu;
+	s16				smendx[];
+};
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;并保存在iommu_fwspec中的&lt;code&gt;iommu_priv&lt;&#x2F;code&gt;指针中。该结构体从名字上就能看出是Master设备的配置，Master这个名词在Spec中是指Bus Master，即可以发起总线请求的设备。函数的核心操作由&lt;code&gt;arm_smmu_master_alloc_smes&lt;&#x2F;code&gt;完成，从名字可以看出是为设备分配Stream Mapping中的表项。对于每一个与设备关联的StreamID，都需要分配一个Stream Mapping中的表项：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;		ret = &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;arm_smmu_find_sme&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(smmu, sid, mask);
+		&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;if &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(ret &amp;lt; &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;0&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;)
+			&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;goto&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; out_err;
+
+		idx = ret;
+		&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;if &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(smrs &amp;amp;&amp;amp; smmu-&amp;gt;s2crs[idx].&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;count &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;== &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;0&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;) {
+			smrs[idx].&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;id &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= sid;
+			smrs[idx].&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;mask &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= mask;
+			smrs[idx].&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;valid &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;true&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;;
+		}
+		smmu-&amp;gt;s2crs[idx].&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;count&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;++;
+		cfg-&amp;gt;smendx[i] = (s16)idx;
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;这里的操作简明易懂，唯一需要注意的就是表项的分配方式。首先搜索整个表中是否存在完全匹配（即集合意义上的包含）的表项，如果存在则使用该表项，否则使用表中第一个发现的空表项。到这里可以发现&lt;code&gt;arm_smmu_master_cfg&lt;&#x2F;code&gt;中的smendx即为保存该Master设备对应的Stream Mapping表项。表项申请完毕后，其实质上还是没有写入到SMMU的mmio空间去的，写入的话这个表项应该就生效了。但是软件上还是没有准备完毕的，这个设备没有加入任何Group或者domain。这里可以看到：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;	group = &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;iommu_group_get_for_dev&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(dev);
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;这个函数是IOMMU核心框架提供的函数，函数最终还是会调用到&lt;code&gt;device_group&lt;&#x2F;code&gt;回调函数。这里我们只需要明确这个函数确定设备属于哪一个Group。最后，为了使表项立马生效，将其写入到S2CR寄存器中：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;for_each_cfg_sme&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(fwspec, i, idx) {
+		&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;arm_smmu_write_sme&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(smmu, idx);
+		smmu-&amp;gt;s2crs[idx].&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;group &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= group;
+	}
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;&lt;h2 id=&quot;arm-smmu-device-group&quot;&gt;arm_smmu_device_group&lt;&#x2F;h2&gt;
+&lt;p&gt;该函数为device_group回调函数，目的是获取一个设备的Group。函数的操作也比较简单：&lt;&#x2F;p&gt;
+&lt;ul&gt;
+&lt;li&gt;sanity check：检查设备所有SME是否都位于同一个Group&lt;&#x2F;li&gt;
+&lt;li&gt;如果设备已经有一个Group，那么返回该Group&lt;&#x2F;li&gt;
+&lt;li&gt;设备没有Group的情况下，则需为设备分配一个Group。对于PCI设备调用&lt;code&gt;pci_device_group&lt;&#x2F;code&gt;，对于其他设备则为&lt;code&gt;generic_device_group&lt;&#x2F;code&gt;&lt;&#x2F;li&gt;
+&lt;&#x2F;ul&gt;
+&lt;h2 id=&quot;arm-smmu-domain-alloc&quot;&gt;arm_smmu_domain_alloc&lt;&#x2F;h2&gt;
+&lt;p&gt;该函数为&lt;code&gt;domain_alloc&lt;&#x2F;code&gt;回调函数，其目的是申请一个domain。SMMU驱动只支持三种domain：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;if &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(type != IOMMU_DOMAIN_UNMANAGED &amp;amp;&amp;amp;
+	    type != IOMMU_DOMAIN_DMA &amp;amp;&amp;amp;
+	    type != IOMMU_DOMAIN_IDENTITY)
+		&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;return &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;NULL&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;;
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;剩下的就是申请内存，初始化一些数据结构了，貌似有一些看着比较关键的字段是空着的。后面可以看到这个时候申请的domain仅仅是占位用的，没有什么实际意义。在调用attach_dev时，会初始化domain context。驱动通过&lt;code&gt;struct arm_smmu_domain&lt;&#x2F;code&gt;里的smmu字段判断context是否已经初始化。&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;arm-smmu-attach-dev&quot;&gt;arm_smmu_attach_dev&lt;&#x2F;h2&gt;
+&lt;p&gt;这里的实现细节是，一个设备的绑定的SMMU与其Stream Mappings已经在&lt;code&gt;add_device&lt;&#x2F;code&gt;回调函数中确定好了。attach_dev的实际操作就是根据设备保存的这些信息初始化domain。初始化domain context由&lt;code&gt;arm_smmu_init_domain_context&lt;&#x2F;code&gt;函数完成，该函数满满的硬件细节，后续需要专门讨论。一个domain在SMMU硬件中实际对应的概念就是Context Bank，在使用Stream Matching的情况下，一共存在三层映射：StreamID &amp;amp;&amp;amp; Mask -&amp;gt; S2CR寄存器 -&amp;gt; Context Bank。因此，初始化完domain（即Context Bank）后需要设置当前设备在Stream Mapping中对应的S2CR寄存器，使其指向该domain对应的Context Bank。&lt;&#x2F;p&gt;
+</content>
+	</entry>
+</feed>

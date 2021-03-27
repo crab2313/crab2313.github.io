@@ -1,0 +1,1058 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en">
+	<title>crab2313&#x27;s blog - drm</title>
+	<link href="https://crab2313.github.io/tags/drm/atom.xml" rel="self" type="application/atom+xml"/>
+  <link href="https://crab2313.github.io"/>
+	<generator uri="https://www.getzola.org/">Zola</generator>
+	<updated>2021-03-26T00:00:00+00:00</updated>
+	<id>https://crab2313.github.io/tags/drm/atom.xml</id>
+	<entry xml:lang="en">
+		<title>DRM显示框架分析</title>
+		<published>2021-03-26T00:00:00+00:00</published>
+		<updated>2021-03-26T00:00:00+00:00</updated>
+		<link href="https://crab2313.github.io/drm/" type="text/html"/>
+		<id>https://crab2313.github.io/drm/</id>
+		<content type="html">&lt;p&gt;真的没有想到真的有人能看到这篇东西，所以我准备抽出时间把这个东西整理完。本文是我阅读内核DRM子系统的一些随笔，其目的是记录我对内核代码的阅读过程和自己的一些理解，希望景嘉微的大佬们多多指正。&lt;&#x2F;p&gt;
+&lt;p&gt;接触linux桌面比较多的人一定会对DRM这个名字比较熟悉。网上也有大把资料在解释DRM到底是什么。DRM主要分为KMS与Render两大部分，本文实质上是在分析DRM中KMS相关的框架实现。而Render相关的API是特定于驱动的，内核并不为用户态提供一个通用的IOCTL接口。如果后续时间充足，我将会分析一下VC4的Render API，以及相应的用户态实现。从功能上讲，KMS负责搭建显示控制器的pipeline，并控制显示硬件将图像缓冲区scanout到屏幕上，而如何加速生成framebuffer中的内容则是3D引擎（即Render API）负责的事情。&lt;&#x2F;p&gt;
+&lt;p&gt;对于KMS，有如下要素：&lt;&#x2F;p&gt;
+&lt;ul&gt;
+&lt;li&gt;显存管理器&lt;&#x2F;li&gt;
+&lt;li&gt;modesetting API&lt;&#x2F;li&gt;
+&lt;li&gt;显示API&lt;&#x2F;li&gt;
+&lt;&#x2F;ul&gt;
+&lt;p&gt;在研究初期，研究案例最好硬件无关，且比较容易懂原理，且能够正常运行，可以参考virtio-gpu和QXL虚拟显卡。等到对内核DRM子系统有一定的理解后，可以分析简单的显卡硬件，如VC4（树莓派3B的显卡）。&lt;&#x2F;p&gt;
+&lt;h1 id=&quot;yue-du-lu-jing&quot;&gt;阅读路径&lt;&#x2F;h1&gt;
+&lt;p&gt;需要看的东西有点多，甚至说比较乱。先列举一下：&lt;&#x2F;p&gt;
+&lt;p&gt;内核中的内容：&lt;&#x2F;p&gt;
+&lt;ul&gt;
+&lt;li&gt;DRM驱动通用代码：包括GEM，KMS&lt;&#x2F;li&gt;
+&lt;li&gt;AMD显卡相关的代码：AMDGPU，RADEON，AMDKFD（通用计算ROCM框架内核驱动）&lt;&#x2F;li&gt;
+&lt;&#x2F;ul&gt;
+&lt;p&gt;用户态代码：&lt;&#x2F;p&gt;
+&lt;ul&gt;
+&lt;li&gt;MESA： OpenGL state tracker， gallium 3D， vulkan， egl（重点），gbm&lt;&#x2F;li&gt;
+&lt;li&gt;libdrm：基本为内核提供的IOCTL的wrapper&lt;&#x2F;li&gt;
+&lt;&#x2F;ul&gt;
+&lt;p&gt;我想要重点理解的部分：&lt;&#x2F;p&gt;
+&lt;ul&gt;
+&lt;li&gt;context到底是什么？如OpenGL和egl创建的context&lt;&#x2F;li&gt;
+&lt;li&gt;mesa的架构&lt;&#x2F;li&gt;
+&lt;li&gt;wayland渲染的基本原理&lt;&#x2F;li&gt;
+&lt;li&gt;DRI到底由什么构成&lt;&#x2F;li&gt;
+&lt;&#x2F;ul&gt;
+&lt;p&gt;这里我觉得还是先从MESA这里着手，毕竟内核驱动缺少文档，且我对接口层到底怎么用还是不是很熟悉。看一下简单的DUMB驱动如何实现也是一个理解KMS比较好的方法。&lt;&#x2F;p&gt;
+&lt;h1 id=&quot;gem&quot;&gt;GEM&lt;&#x2F;h1&gt;
+&lt;h2 id=&quot;gemyu-ttmzhi-jian-de-guan-xi&quot;&gt;GEM与TTM之间的关系&lt;&#x2F;h2&gt;
+&lt;p&gt;TTM是内核最初的DRM显存管理器，其设计思想是试图为所有的显卡驱动提供一个公共的API。TTM后面被认为是失败的，其API与实现复杂不可控，没有人愿意用他。后来intel吸取教训，设计了GEM，其设计较为灵活，只提供基本的实现，部分功能需要驱动程序通过驱动自定的接口进行扩展。GEM与TTM在特性上的主要区别为GEM不支持管理独立显存，只支持UMA，而TTM两种都支持。目前的DRM驱动程序中，基本都使用GEM作为前端为用户态提供接口，而涉及到管理独立显存的时候，则借助TTM作为后端实现管理功能。&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;kuang-jia-chu-shi-hua&quot;&gt;框架初始化&lt;&#x2F;h2&gt;
+&lt;p&gt;驱动程序可以自己选择是否使用GEM框架，如果选择使用，则需要在注册&lt;code&gt;drm_driver&lt;&#x2F;code&gt;到DRM core中时，在&lt;code&gt;driver_features&lt;&#x2F;code&gt;里设置DRIVER_GEM标志。在驱动加载时，DRM框架会自动初始化GEM。&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;handleyu-name&quot;&gt;handle与name&lt;&#x2F;h2&gt;
+&lt;p&gt;handle是gem_object的引用，其作用域被限制在drm文件描述符内，用于用户态程序引用内核态的drm_gem_object。当drm文件描述符被关闭时，所有的handle都会被关闭。而name则是drm_gem_object的名称，为一个32-bit整数。name的作用域是全局的，因此被直接保存在drm_gem_object内。默认情况下drm_gem_object的name都为0，表示其是未命名的。用户态可以通过FLINK为drm_gem_object命名，之后系统内的其他进程可以通过对应的name对该drm_gem_object进行访问。&lt;&#x2F;p&gt;
+&lt;p&gt;handle的创建是创建GEM对象的一个步骤。目前GEM对象的创建一般是通过设备相关的API进行实现的，驱动程序可以通过&lt;code&gt;drm_gem_handle_create&lt;&#x2F;code&gt;函数从对应drm文件中创建一个handle返回给用于态。关于handle，gem core中还提供了&lt;code&gt;drm_gem_handle_delete&lt;&#x2F;code&gt;和&lt;code&gt;drm_gem_handle_lookup&lt;&#x2F;code&gt;函数。事实上，handle的管理是通过idr实现的。&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;drm-gem-object&quot;&gt;drm_gem_object&lt;&#x2F;h2&gt;
+&lt;p&gt;该对象是GEM内存管理的核心。GEM目前提供的功能是不完全的，部分空缺需要驱动自行填补，因此GEM框架要求驱动在&lt;code&gt;drm_gem_object&lt;&#x2F;code&gt;的基础上实现自己的GEM对象。这个操作实际上就是将&lt;code&gt;drm_gem_object&lt;&#x2F;code&gt;嵌入到驱动自己定义的&lt;code&gt;{driver}_gem_object&lt;&#x2F;code&gt;中。&lt;code&gt;drm_gem_object&lt;&#x2F;code&gt;定义在&lt;code&gt;include&#x2F;drm&#x2F;drm_gem.h&lt;&#x2F;code&gt;中，且有详细的注释，这里不再赘述，重点分析一些字段。&lt;&#x2F;p&gt;
+&lt;p&gt;&lt;code&gt;filp&lt;&#x2F;code&gt;是一个指向&lt;code&gt;struct file&lt;&#x2F;code&gt;的指针，要理解它的作用就必须理解真正的内存是如何分配的。前面提到了GEM只支持UMA，即显卡使用RAM做为显存，这就又涉及到了两种情况。在PC中由于IOMMU的存在，显卡并不强制要求连续的物理内存，因此GEM可以使用SHMFS做为存储后端，此时filp指针就指向对应的文件描述符。而在嵌入式应用场景下，大部分设备没有IOMMU，因此必须要求连续的物理内存，此时filp为NULL，驱动通过CMA申请到连续的物理内存用作存储后端。注意，GEM框架并不负责管理存储后端，只提供了一些基本的helper，而存储的分配与释放完全由驱动程序控制。&lt;&#x2F;p&gt;
+&lt;p&gt;TODO： 研究一下SHMFS&lt;&#x2F;p&gt;
+&lt;p&gt;&lt;code&gt;vma_node&lt;&#x2F;code&gt;简单来说是保存了这个object的mmap偏移量。这里又需要提及&lt;code&gt;drm_gem_object&lt;&#x2F;code&gt;向用户态的映射问题。GEM目前基本上是通过两种方式实现MAP gem_object到用户态的：设备相关IOCTL和基于drm文件描述符的mmap。后者通过一个虚拟的偏移量确定mmap究竟在映射哪一个&lt;code&gt;drm_gem_object&lt;&#x2F;code&gt;。该机制的实现细节需要单独讨论。&lt;&#x2F;p&gt;
+&lt;p&gt;&lt;code&gt;dma_buf&lt;&#x2F;code&gt;字段是一个&lt;code&gt;struct dma_buf&lt;&#x2F;code&gt;类型的字段。这里又设计drm-prime框架的细节了。简单来说，通过name来实现进程间共享&lt;code&gt;drm_gem_object&lt;&#x2F;code&gt;存在显而易见的安全性问题，毕竟name是全局的。攻击者可以通过特定的pattern推测或者枚举&lt;code&gt;drm_gem_object&lt;&#x2F;code&gt;的name，达到窃取数据的目的。后续GEM集成了dma_buf，可以通过dma_buf实现共享。&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;yong-hu-tai-ying-she&quot;&gt;用户态映射&lt;&#x2F;h2&gt;
+&lt;p&gt;用户态映射实质上就是将&lt;code&gt;drm_gem_object&lt;&#x2F;code&gt;描述的存储空间映射到用户态进程的虚拟地址空间，让用户态进程可以随机读写。正如前面提到的，这里只分析GEM提供的方式，即基于drm文件描述符的mmap。我们知道mmap系统调用的原型如下：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;void &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;*&lt;&#x2F;span&gt;&lt;span style=&quot;color:#8fa1b3;&quot;&gt;mmap&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;void &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;*&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;addr&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;, size_t &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;length&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;, &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;int &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;prot&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;, &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;int &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;flags&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;, &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;int &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;fd&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;, off_t &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;offset&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;); 
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;GEM框架可以为每一个&lt;code&gt;drm_gem_object&lt;&#x2F;code&gt;绑定一个特定虚拟offset，通过offset辨别需要映射到用户态的&lt;code&gt;drm_gem_object&lt;&#x2F;code&gt;。该机制需要drm文件描述符与&lt;code&gt;drm_gem_object&lt;&#x2F;code&gt;的共同协作，前面看到&lt;code&gt;drm_gem_object&lt;&#x2F;code&gt;中提供了vma_node用于保存该信息，驱动程序需要自行调用&lt;code&gt;drm_gem_create_mmap_offset&lt;&#x2F;code&gt;为一个&lt;code&gt;drm_gem_object&lt;&#x2F;code&gt;注册一个虚拟offset。虚拟offset需要通过设备相关的IOCTL传递给用户态。&lt;code&gt;drm_device&lt;&#x2F;code&gt;中存在vma_offset_manager用于统一管理mmap的虚拟offset，其后端基本上为drm_mm与红黑树缓存的组合。&lt;&#x2F;p&gt;
+&lt;h1 id=&quot;dumb&quot;&gt;DUMB&lt;&#x2F;h1&gt;
+&lt;p&gt;(TODO)&lt;&#x2F;p&gt;
+&lt;h1 id=&quot;gbm&quot;&gt;GBM&lt;&#x2F;h1&gt;
+&lt;p&gt;前面看到基于GEM的驱动对外是没有提供统一的内存管理接口的，至少Buffer Object创建销毁等操作是需要自行提供设备相关的即口进行实现的。用户态没有统一的接口对缓冲区进行管理，这导致某些特定用户态程序的开发的困难，如wayland compositor。MESA项目提供了libgbm，抽象并实现了一个通用的buffer管理API。这里记录对该API进行的探讨。&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;note&quot;&gt;Note&lt;&#x2F;h2&gt;
+&lt;p&gt;经过代码分析，gbm实际上来源于MESA内存OpenGL实现的&lt;code&gt;internal&#x2F;drm_interface.h&lt;&#x2F;code&gt;，也就是Mesa OpenGL实现的一个私有兼容层。&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;gbm-device&quot;&gt;gbm_device&lt;&#x2F;h2&gt;
+&lt;p&gt;&lt;code&gt;gbm_device&lt;&#x2F;code&gt;是DRM设备的抽象，管理所有的分配出来的BO（Buffer Object）。自然而然：&lt;&#x2F;p&gt;
+&lt;ul&gt;
+&lt;li&gt;一个&lt;code&gt;gbm_device&lt;&#x2F;code&gt;创建出来的BO的生命周期与该&lt;code&gt;gbm_device&lt;&#x2F;code&gt;绑定&lt;&#x2F;li&gt;
+&lt;li&gt;&lt;code&gt;gbm_device&lt;&#x2F;code&gt;与特定DRI设备绑定&lt;&#x2F;li&gt;
+&lt;&#x2F;ul&gt;
+&lt;p&gt;&lt;code&gt;gbm_create_device&lt;&#x2F;code&gt;负责从一个DRM设备中创建&lt;code&gt;gbm_device&lt;&#x2F;code&gt;：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; gbm_device* &lt;&#x2F;span&gt;&lt;span style=&quot;color:#8fa1b3;&quot;&gt;gbm_create_device&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;int &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;fd&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;);
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;这里的fd自然是打开&lt;code&gt;&#x2F;dev&#x2F;dri&#x2F;card*&lt;&#x2F;code&gt;时的文件描述符。&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;gbm-bo&quot;&gt;gbm_bo&lt;&#x2F;h2&gt;
+&lt;p&gt;&lt;code&gt;gbm_bo_create&lt;&#x2F;code&gt;函数用于创建BO，其原型如下：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; gbm_bo *
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#8fa1b3;&quot;&gt;gbm_bo_create&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; gbm_device *&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;gbm&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;,
+              uint32_t &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;width&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;, uint32_t &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;height&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;,
+              uint32_t &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;format&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;, uint32_t &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;flags&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;);
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;函数非常简单，只需要指定BO的长宽，格式以及标志（enum gbm_bo_flags）。GBM提供了一些基本的helper用于获取BO的相关属性。除此之外比较重要的操作就是将BO映射到用户态地址空间了：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;void &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;*&lt;&#x2F;span&gt;&lt;span style=&quot;color:#8fa1b3;&quot;&gt;gbm_bo_map &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; gbm_bo *&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;bo&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;, uint32_t &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;x&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;, uint32_t &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;y&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;, uint32_t &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;width&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;, uint32_t &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;height&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;, uint32_t &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;flags&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;, uint32_t *&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;stride&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;, &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;void &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;**&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;map_data&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;);
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;可以看到该函数提供了将BO中的特定二维区域映射到功能。&lt;&#x2F;p&gt;
+&lt;h1 id=&quot;kms&quot;&gt;KMS&lt;&#x2F;h1&gt;
+&lt;p&gt;主要分为用户态接口的使用，内核提供的框架和通用接口。&lt;&#x2F;p&gt;
+&lt;p&gt;KMS将整个显示pipeline抽象成以下几个部分：&lt;&#x2F;p&gt;
+&lt;ul&gt;
+&lt;li&gt;framebuffer&lt;&#x2F;li&gt;
+&lt;li&gt;plane&lt;&#x2F;li&gt;
+&lt;li&gt;crtc&lt;&#x2F;li&gt;
+&lt;li&gt;encoder&lt;&#x2F;li&gt;
+&lt;li&gt;connector&lt;&#x2F;li&gt;
+&lt;&#x2F;ul&gt;
+&lt;p&gt;其中每一个部分的含义可以参考内核文档，这里不赘述，这里只分析其在内核框架中是如何实现的。&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;dui-xiang-guan-li&quot;&gt;对象管理&lt;&#x2F;h2&gt;
+&lt;p&gt;对于这几个对象，DRM框架将其称作“对象”，有一个公共的基类&lt;code&gt;struct drm_mode_object&lt;&#x2F;code&gt;，这个几个对象都由这个基类扩展而来。事实上，这个基类扩展出来的子类并不是只有上面提到的几种。&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;drm_mode_object {
+  uint32_t id;
+  uint32_t type;
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;drm_object_properties *properties;
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; kref refcount;
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;void &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(*free_cb)(&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; kref *kref);
+};
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;其中id和type分别为这个对象在KMS子系统中的ID和类型（即上面提到的几种）。注意所有的&lt;code&gt;drm_mode_object&lt;&#x2F;code&gt;的id共用一个namespace，保存在&lt;code&gt;drm_device-&amp;gt;mode_config.object_idr&lt;&#x2F;code&gt;中。因此，框架提供了&lt;code&gt;drm_mode_object_find&lt;&#x2F;code&gt;函数用于查找对应id的对象。当前DRM框架中存在如下的对象类型：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;#define &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;DRM_MODE_OBJECT_CRTC &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;0xcccccccc
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;#define &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;DRM_MODE_OBJECT_CONNECTOR &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;0xc0c0c0c0
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;#define &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;DRM_MODE_OBJECT_ENCODER &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;0xe0e0e0e0
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;#define &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;DRM_MODE_OBJECT_MODE &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;0xdededede
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;#define &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;DRM_MODE_OBJECT_PROPERTY &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;0xb0b0b0b0
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;#define &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;DRM_MODE_OBJECT_FB &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;0xfbfbfbfb
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;#define &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;DRM_MODE_OBJECT_BLOB &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;0xbbbbbbbb
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;#define &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;DRM_MODE_OBJECT_PLANE &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;0xeeeeeeee
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;#define &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;DRM_MODE_OBJECT_ANY &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;0
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;从&lt;code&gt;drm_mode_object&lt;&#x2F;code&gt;的定义中即可发现其实现了两个比较重要的功能：&lt;&#x2F;p&gt;
+&lt;ul&gt;
+&lt;li&gt;引用计数及生命周期管理&lt;&#x2F;li&gt;
+&lt;li&gt;属性管理&lt;&#x2F;li&gt;
+&lt;&#x2F;ul&gt;
+&lt;p&gt;属性在DRM中由&lt;code&gt;struct drm_property&lt;&#x2F;code&gt;表示，其本质是一个&lt;code&gt;DRM_MODE_OBJECT_PROPERTY&lt;&#x2F;code&gt;类型的&lt;code&gt;drm_mode_object&lt;&#x2F;code&gt;。一个&lt;code&gt;drm_mode_object&lt;&#x2F;code&gt;的所有属性保存在其内部的&lt;code&gt;drm_object_properties&lt;&#x2F;code&gt;中，其实现如下：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;drm_object_properties {
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;int&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; count;
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;drm_property *properties[DRM_OBJECT_MAX_PROPERTY];
+  uint64_t values[DRM_OBJECT_MAX_PROPERTY];
+};
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;可以看到每一个对象最多可以有24个属性。这里注意一个实现细节，&lt;code&gt;drm_property&lt;&#x2F;code&gt;表示一个属性对象，描述属性的类型（如整形，range，浮点数等）、名称和取值范围（约束）。&lt;code&gt;drm_object_properties&lt;&#x2F;code&gt;中的properties保存属性的类型，而&lt;code&gt;values&lt;&#x2F;code&gt;保存对应类型的值。这是因为同一类型的对象基本上都共有特定名称和类型的属性，独立的属性对象使得我们不需要为在每一个对象中都保存同样的属性名称和类型。对象的属性可以通过&lt;code&gt;drm_object_property_*&lt;&#x2F;code&gt;函数操作。&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;atomic-mode-setting&quot;&gt;Atomic Mode Setting&lt;&#x2F;h2&gt;
+&lt;p&gt;先写一下我的理解，看看到最后读完代码有什么新收获没有。&lt;&#x2F;p&gt;
+&lt;p&gt;首先Atomic Mode Setting是DRM子系统最近的一次比较大的改动，其目的是填补当前API的不足。由于原先的API不支持同时更新整个DRM显示pipeline的状态，因此KMS过程中会出现一些中间状态，容易造成开发者不希望看见的结果，影响用户体验。同时，原先的KMS接口也不支持回滚，需要应用程序自己记录原先的配置状态，Atomic Mode Setting也解决了这个问题。&lt;&#x2F;p&gt;
+&lt;p&gt;由于Atomic Mode Setting是新出现的API，为了解决用户态程序的兼容性问题，Atomic Mode Setting的接口被隐藏起来，只有用户态程序显式告知DRM层其支持Atomic Mode Setting时它的接口才会暴露出来。目前主流的开源驱动基本都已经迁移到了Atomic Mode Setting接口上了。&lt;&#x2F;p&gt;
+&lt;p&gt;Atomic Mode Setting接口在用户态看来，是将原先各个KMS object的状态由隐式的通过API更新，变成了显式的对象属性。用户态程序可以通过通用的属性操作接口读写KMS object上的属性，更改不会立即生效，而是缓存起来。当应用程序更新完其所有想要更新的属性时，可以通过Commit操作告知要求KMS层真正的更新硬件的状态。此时驱动程序需要验证应用程序要求进行的修改是否合法，在合法的情况下，可以一次性完成整个显示状态的修改。Atomic Mode Setting也实现了只用于检查新状态是否合法的接口。&lt;&#x2F;p&gt;
+&lt;p&gt;由于Atomic Mode Setting提供的接口的功能是强于原先的KMS接口的，因此原先的KMS接口可以被Atomic Mode Setting接口实现。KMS Core提供了一些helper函数用以帮助驱动程序作者实现原先的Legacy KMS接口[&lt;a href=&quot;https:&#x2F;&#x2F;www.kernel.org&#x2F;doc&#x2F;html&#x2F;latest&#x2F;gpu&#x2F;drm-kms-helpers.html#atomic-modeset-helper-functions-reference&quot; title=&quot;Atomic Modeset Helper Functions Reference&quot;&gt;1&lt;&#x2F;a&gt;]&lt;a href=&quot;https:&#x2F;&#x2F;www.kernel.org&#x2F;doc&#x2F;html&#x2F;latest&#x2F;gpu&#x2F;drm-kms-helpers.html#atomic-modeset-helper-functions-reference&quot; title=&quot;Atomic Modeset Helper Functions Reference&quot;&gt;1&lt;&#x2F;a&gt;。&lt;&#x2F;p&gt;
+&lt;p&gt;由于Legacy接口注定要扔到历史垃圾箱，后续的所有分析都是以&lt;code&gt;Atomic Mode Setting&lt;&#x2F;code&gt;的code path作为基准。&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;qu-dong-jie-kou&quot;&gt;驱动接口&lt;&#x2F;h2&gt;
+&lt;p&gt;驱动实现KMS接口的方式如下：&lt;&#x2F;p&gt;
+&lt;ul&gt;
+&lt;li&gt;在probe函数中调用&lt;code&gt;drm_mode_config_init&lt;&#x2F;code&gt;函数初始化KMS core&lt;&#x2F;li&gt;
+&lt;li&gt;填充mode_config中int min_width, min_height; int max_width, max_height的值，这些值是framebuffer的大小限制&lt;&#x2F;li&gt;
+&lt;li&gt;设置mode_config中的funcs&lt;&#x2F;li&gt;
+&lt;&#x2F;ul&gt;
+&lt;p&gt;下面以virtio-gpu为例分析驱动的实现。对于virtio-gpu上面的操作步骤实现如下：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;drm_mode_config_init&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(vgdev-&amp;gt;ddev);
+        vgdev-&amp;gt;ddev-&amp;gt;mode_config.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;quirk_addfb_prefer_host_byte_order &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;true&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;;
+        vgdev-&amp;gt;ddev-&amp;gt;mode_config.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;funcs &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= &amp;amp;virtio_gpu_mode_funcs;
+        vgdev-&amp;gt;ddev-&amp;gt;mode_config.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;helper_private &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= &amp;amp;virtio_mode_config_helpers;
+
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#65737e;&quot;&gt;&#x2F;* modes will be validated against the framebuffer size *&#x2F;
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;        vgdev-&amp;gt;ddev-&amp;gt;mode_config.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;min_width &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= XRES_MIN;
+        vgdev-&amp;gt;ddev-&amp;gt;mode_config.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;min_height &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= YRES_MIN;
+        vgdev-&amp;gt;ddev-&amp;gt;mode_config.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;max_width &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= XRES_MAX;
+        vgdev-&amp;gt;ddev-&amp;gt;mode_config.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;max_height &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= YRES_MAX;
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;funcs中填充的内容如下：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;static const struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; drm_mode_config_funcs virtio_gpu_mode_funcs = {
+        .&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;fb_create &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= virtio_gpu_user_framebuffer_create,
+        .&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;atomic_check &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= drm_atomic_helper_check,
+        .&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;atomic_commit &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= drm_atomic_helper_commit,
+};
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;&lt;h2 id=&quot;helperjia-gou&quot;&gt;helper架构&lt;&#x2F;h2&gt;
+&lt;p&gt;helper架构是我起的名，知道是指什么东西就好。DRM子系统的API比较难抽象，简单来说就是硬件各有各的不同，很多情况下，驱动可以使用一个共同的实现，而在其它情况下，驱动需要提供自己的实现。因此，DRM驱动核心的接口使用了helper架构，其基本思想是通过一组回调函数抽象特定组件的操作，比如&lt;code&gt;drm_connector_funcs&lt;&#x2F;code&gt;，同时又使用另外一组helper函数给出了原先那组回调函数的通用实现，让开发最者实现这组helper函数抽象出的回调函数即可。&lt;&#x2F;p&gt;
+&lt;p&gt;这样双层的实现即能保证开发者有足够高的自由度（完全不用helper函数），也能简化开发者的开发（使用helper函数），同时提供给开发者hook特定helper函数的能力。下面以&lt;code&gt;drm_connector&lt;&#x2F;code&gt;为例说明helper架构的实现与使用方式。&lt;&#x2F;p&gt;
+&lt;p&gt;正常情况下，创建&lt;code&gt;drm_connector&lt;&#x2F;code&gt;对象时需要提供&lt;code&gt;struct drm_connector_funcs&lt;&#x2F;code&gt;回调函数组，而使用helper函数时，可以直接用helper函数填充对应回调函数：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;static const struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; drm_connector_funcs vc4_hdmi_connector_funcs = {
+        .&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;detect &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= vc4_hdmi_connector_detect,
+        .&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;fill_modes &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= drm_helper_probe_single_connector_modes,
+        .&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;destroy &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= vc4_hdmi_connector_destroy,
+        .&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;reset &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= drm_atomic_helper_connector_reset,
+        .&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;atomic_duplicate_state &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= drm_atomic_helper_connector_duplicate_state,
+        .&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;atomic_destroy_state &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= drm_atomic_helper_connector_destroy_state,
+};
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;事实上helper函数并不万能，只是抽象出了大多数驱动程序应该共享的行为，而特定于硬件的部分，则需要以回调函数的形式提供给helper函数，这个回调函数组由&lt;code&gt;struct drm_connector_helper_funcs&lt;&#x2F;code&gt;提供。在创建&lt;code&gt;drm_connector&lt;&#x2F;code&gt;时，需要通过&lt;code&gt;drm_connector_helper_add&lt;&#x2F;code&gt;函数注册。函数将对应的回调函数对象的地址保存在了&lt;code&gt;drm_connector&lt;&#x2F;code&gt;中的&lt;code&gt;helper_private&lt;&#x2F;code&gt;指针中，如下：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;static inline void &lt;&#x2F;span&gt;&lt;span style=&quot;color:#8fa1b3;&quot;&gt;drm_connector_helper_add&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; drm_connector *&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;connector&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;,
+                                            &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;const struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; drm_connector_helper_funcs *&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;funcs&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;)
+{
+        connector-&amp;gt;helper_private = funcs;
+}
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;这一套实现位于&lt;code&gt;include&#x2F;drm&#x2F;drm_modeset_helper_vtables.h&lt;&#x2F;code&gt;中，其他的DRM对象都有类似的实现，可以详细阅读&lt;code&gt;drm_connector_helper_funcs&lt;&#x2F;code&gt;的注释，理解其中对应的回调函数的用途。在实现DRM驱动时，helper架构会频繁用到，合理掌握helper函数可以极大简化开发，提升驱动程序的兼容性。&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;crtc&quot;&gt;CRTC&lt;&#x2F;h2&gt;
+&lt;h2 id=&quot;framebuffer&quot;&gt;Framebuffer&lt;&#x2F;h2&gt;
+&lt;p&gt;&lt;a href=&quot;https:&#x2F;&#x2F;www.kernel.org&#x2F;doc&#x2F;html&#x2F;latest&#x2F;gpu&#x2F;drm-kms.html#frame-buffer-abstraction&quot;&gt;内核文档&lt;&#x2F;a&gt;&lt;&#x2F;p&gt;
+&lt;p&gt;framebuffer应该是唯一一个与硬件无关的抽象了。驱动程序需要提供自己的framebuffer实现，其主要入口就是前面提到的&lt;code&gt;drm_mode_config_funcs-&amp;gt;fb_create&lt;&#x2F;code&gt;回调函数。驱动程序通过扩展&lt;code&gt;drm_framebuffer&lt;&#x2F;code&gt;结构体可以向framebuffer中加入自己私有的字段。&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;virtio_gpu_framebuffer {
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; drm_framebuffer base;
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;virtio_gpu_fence *fence;
+};
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;创建framebuffer时，需要通过&lt;code&gt;drm_framebuffer_init&lt;&#x2F;code&gt;函数将framebuffer初始化，并导出到用户空间。&lt;code&gt;fb_create&lt;&#x2F;code&gt;函数接受一个&lt;code&gt;drm_mode_fb_cmd2&lt;&#x2F;code&gt;类型的参数：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;drm_mode_fb_cmd2 {
+        __u32 fb_id;
+        __u32 width;
+        __u32 height;
+        __u32 pixel_format; &lt;&#x2F;span&gt;&lt;span style=&quot;color:#65737e;&quot;&gt;&#x2F;* fourcc code from drm_fourcc.h *&#x2F;
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;        __u32 flags; &lt;&#x2F;span&gt;&lt;span style=&quot;color:#65737e;&quot;&gt;&#x2F;* see above flags *&#x2F;
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;        __u32 handles[&lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;4&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;];
+        __u32 pitches[&lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;4&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;]; &lt;&#x2F;span&gt;&lt;span style=&quot;color:#65737e;&quot;&gt;&#x2F;* pitch for each plane *&#x2F;
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;        __u32 offsets[&lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;4&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;]; &lt;&#x2F;span&gt;&lt;span style=&quot;color:#65737e;&quot;&gt;&#x2F;* offset of each plane *&#x2F;
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;        __u64 modifier[&lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;4&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;]; &lt;&#x2F;span&gt;&lt;span style=&quot;color:#65737e;&quot;&gt;&#x2F;* ie, tiling, compress *&#x2F;
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;};
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;其中最重要的就是handle，handle是Buffer Object的指针，该Buffer Object就是被创建framebuffer的存储后端。&lt;&#x2F;p&gt;
+&lt;p&gt;TODO framebuffer releated operation&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;plane&quot;&gt;Plane&lt;&#x2F;h2&gt;
+&lt;p&gt;&lt;a href=&quot;https:&#x2F;&#x2F;www.kernel.org&#x2F;doc&#x2F;html&#x2F;latest&#x2F;gpu&#x2F;drm-kms.html#plane-abstraction&quot;&gt;内核文档&lt;&#x2F;a&gt;&lt;&#x2F;p&gt;
+&lt;p&gt;plane由&lt;code&gt;drm_plane&lt;&#x2F;code&gt;表示，其本质是对显示控制器中scanout硬件的抽象。简单来说，给定一个plane，可以让其与一个framebuffer关联表示进行scanout的数据，同时控制控制scanout时进行的额外操作，比如colorspace的改变，旋转、拉伸等操作。&lt;code&gt;drm_plane&lt;&#x2F;code&gt;是与硬件强相关的，显示控制器支持的plane是固定的，其支持的功能也是由硬件决定的。&lt;&#x2F;p&gt;
+&lt;p&gt;对于&lt;code&gt;drm_plane&lt;&#x2F;code&gt;的分析，我们从其结构体定义入手。首先可以看到，一个plane必须要与一个&lt;code&gt;drm_deivce&lt;&#x2F;code&gt;关联，且一个&lt;code&gt;drm_device&lt;&#x2F;code&gt;中支持的所有plane都被保存在一个链表中。&lt;code&gt;drm_plane&lt;&#x2F;code&gt;中存有一个mask，用以表示该&lt;code&gt;drm_plane&lt;&#x2F;code&gt;可以绑定的CRTC。同时&lt;code&gt;drm_plane&lt;&#x2F;code&gt;中也保存了一个&lt;code&gt;format_types&lt;&#x2F;code&gt;数组，表示该&lt;code&gt;plane&lt;&#x2F;code&gt;支持的framebuffer格式。&lt;&#x2F;p&gt;
+&lt;p&gt;所有的&lt;code&gt;drm_plane&lt;&#x2F;code&gt;必为三种类型之一：&lt;&#x2F;p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;code&gt;Primary&lt;&#x2F;code&gt; - 主plane，一般控制整个显示器的输出。CRTC必须要有一个这样的plane。&lt;&#x2F;li&gt;
+&lt;li&gt;&lt;code&gt;Curosr&lt;&#x2F;code&gt; - 表示鼠标光标，可选。&lt;&#x2F;li&gt;
+&lt;li&gt;&lt;code&gt;Overlay&lt;&#x2F;code&gt; - 叠加plane，可以在主plane上叠加一层输出，可选。&lt;&#x2F;li&gt;
+&lt;&#x2F;ul&gt;
+&lt;p&gt;来回顾一点历史：内核向用户态导出的接口实际上不包含&lt;code&gt;Primary Plane&lt;&#x2F;code&gt;，对应plane的接口只能操作&lt;code&gt;Cursor Plane&lt;&#x2F;code&gt;和&lt;code&gt;Overlay Plane&lt;&#x2F;code&gt;，后期提供了一个&lt;code&gt;Universial Plane&lt;&#x2F;code&gt;特性，使得用户态API可以直接操作&lt;code&gt;Primary Plane&lt;&#x2F;code&gt;。在明白这个历史遗留问题后，对&lt;code&gt;drm_plane&lt;&#x2F;code&gt;的实现就好理解了。&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;encoder&quot;&gt;Encoder&lt;&#x2F;h2&gt;
+&lt;h2 id=&quot;mode&quot;&gt;Mode&lt;&#x2F;h2&gt;
+&lt;p&gt;一般人对mode的理解仅仅是分辨率，这种理解在DRM中是不够的，不足以理解&lt;code&gt;drm_display_mode&lt;&#x2F;code&gt;是干什么的。简单来说，mode是一组信号时序，用以驱动显示器正确显示一帧图像。首先能够猜到需要传什么东西给显示器：像素数据。而到底多少个像素就跟显示器的分辨率有关了，如1080p的显示器需要传递&lt;code&gt;1080 x 1920&lt;&#x2F;code&gt;个像素。更加具体的形式是一行一行的从左到右发送，由于硬件实现需要，需要额外的步骤对信号进行同步。帧与帧之间被称为vertical，即竖直的，而行与行之间被称为horizontal，即水平的，这直接对应于显示器的横竖方向。&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; *               Active                 Front           Sync           Back
+ *              Region                 Porch                          Porch
+ *     &amp;lt;-----------------------&amp;gt;&amp;lt;----------------&amp;gt;&amp;lt;-------------&amp;gt;&amp;lt;--------------&amp;gt;
+ *       &lt;&#x2F;span&gt;&lt;span style=&quot;color:#65737e;&quot;&gt;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;|
+ &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;*      &lt;&#x2F;span&gt;&lt;span style=&quot;color:#65737e;&quot;&gt;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F; |
+ &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;*     &lt;&#x2F;span&gt;&lt;span style=&quot;color:#65737e;&quot;&gt;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;&#x2F;  |..................               ................
+ &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;*                                                _______________
+ *     &amp;lt;----- [hv]display -----&amp;gt;
+ *     &amp;lt;------------- [hv]sync_start ------------&amp;gt;
+ *     &amp;lt;--------------------- [hv]sync_end ---------------------&amp;gt;
+ *     &amp;lt;-------------------------------- [hv]total -----------------------------&amp;gt;*
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;上面内核注释中的字符画完美的解释了&lt;code&gt;drm_display_mode&lt;&#x2F;code&gt;中变量的定义。需要注意的是现实状况中，还有需要其它复杂的显示模式，比如interlaced模式等，所以&lt;code&gt;drm_display_mode&lt;&#x2F;code&gt;区分逻辑参数与硬件参数，硬件参数就是真正进行硬件操作时使用的参数，而逻辑参数是为了方便驱动开发人员进行的抽象，&lt;code&gt;drm_display_mode&lt;&#x2F;code&gt;根据相应的flag计算出硬件参数。&lt;&#x2F;p&gt;
+&lt;p&gt;除了上述直接与硬件相关的参数，&lt;code&gt;drm_display_mode&lt;&#x2F;code&gt;还携带了一些DRM相关的属性。比如类型：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#65737e;&quot;&gt;&#x2F;**
+         * @type:
+         *
+         * A bitmask of flags, mostly about the source of a mode. Possible flags
+         * are:
+         *
+         *  - DRM_MODE_TYPE_PREFERRED: Preferred mode, usually the native
+         *    resolution of an LCD panel. There should only be one preferred
+         *    mode per connector at any given time.
+         *  - DRM_MODE_TYPE_DRIVER: Mode created by the driver, which is all of
+         *    them really. Drivers must set this bit for all modes they create
+         *    and expose to userspace.
+         *  - DRM_MODE_TYPE_USERDEF: Mode defined via kernel command line
+         *&#x2F;
+		&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;unsigned int&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; type;
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;可以看到mode的两个来源：驱动创建和内核命令行自行定义。而&lt;code&gt;DRM_MODE_TYPE_PREFERRED&lt;&#x2F;code&gt;标记的&lt;code&gt;drm_display_mode&lt;&#x2F;code&gt;则一般为对应connector的native mode。除此之外一个比较重要的属性就是status：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#65737e;&quot;&gt;&#x2F;**
+         * @status:
+         *
+         * Status of the mode, used to filter out modes not supported by the
+         * hardware. See enum &amp;amp;drm_mode_status.
+         *&#x2F;
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;enum&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; drm_mode_status status;
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;该属性直接标记该mode是否可以被硬件接受，如果不行，则会标注出具体原因。对应显示器的长宽一般会由&lt;code&gt;width_mm&lt;&#x2F;code&gt;和&lt;code&gt;height_mm&lt;&#x2F;code&gt;记录，单位是毫米。最后注意&lt;code&gt;drm_display_mode&lt;&#x2F;code&gt;一般与&lt;code&gt;drm_connector&lt;&#x2F;code&gt;关联，因此&lt;code&gt;drm_modes.c&lt;&#x2F;code&gt;中提供了相应的helper函数，比如：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;void &lt;&#x2F;span&gt;&lt;span style=&quot;color:#8fa1b3;&quot;&gt;drm_mode_probed_add&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; drm_connector *&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;connector&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;,
+                         &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; drm_display_mode *&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;mode&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;)
+{
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;WARN_ON&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(!&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;mutex_is_locked&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(&amp;amp;connector-&amp;gt;dev-&amp;gt;mode_config.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;mutex&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;));
+
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;list_add_tail&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(&amp;amp;mode-&amp;gt;head, &amp;amp;connector-&amp;gt;probed_modes);
+}
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;&lt;code&gt;drm_mode_probed_add&lt;&#x2F;code&gt;函数将该mode添加到一个connector的管理中。注意probed_modes列表中可能包含了许多硬件无法使用的mode，对于这样的一个列表，可以使用&lt;code&gt;drm_mode_prune_invalid&lt;&#x2F;code&gt;将其中非法的mode清除。&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;connector&quot;&gt;Connector&lt;&#x2F;h2&gt;
+&lt;p&gt;首先明确connector抽象了什么东西。从内核文档的描述中可以明白，connector抽象的是一个&lt;strong&gt;能够显示像素的设备&lt;&#x2F;strong&gt;，从流媒体的角度来说，就是一个sink，是最终的图像输出的地方。或者更加具象的理解一下，字面意思就是显卡上面的接头，比如HDMI，DP等接头。connector由&lt;code&gt;struct drm_connector&lt;&#x2F;code&gt;进行表示，并定义在&lt;code&gt;include&#x2F;drm&#x2F;drm_connector.h&lt;&#x2F;code&gt;中，接下来就分析其相关实现。&lt;&#x2F;p&gt;
+&lt;p&gt;首先从该结构体的定义下手，可以看到结构体定义开始比较长的，先从常规部分下手：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;drm_connector {
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#65737e;&quot;&gt;&#x2F;** @dev: parent DRM device *&#x2F;
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;drm_device *dev;
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#65737e;&quot;&gt;&#x2F;** @kdev: kernel device for sysfs attributes *&#x2F;
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;device *kdev;
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#65737e;&quot;&gt;&#x2F;** @attr: sysfs attributes *&#x2F;
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;device_attribute *attr;
+		.......
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;很明显，从这里看出，内核认为&lt;code&gt;struct drm_connector&lt;&#x2F;code&gt;是sysfs树形结构的一员，翻译一下，就是一个&lt;code&gt;struct drm_connector&lt;&#x2F;code&gt;对象会对应&lt;code&gt;&#x2F;sys&lt;&#x2F;code&gt;目录下的某个子文件夹（节点）。有关该文件夹中相关的属性文件可以后续进行分析。&lt;&#x2F;p&gt;
+&lt;p&gt;接下来可以看到明白一个&lt;code&gt;drm_device&lt;&#x2F;code&gt;中的所有connector都会被保存在一个链表中，进行管理，且&lt;code&gt;drm_connector&lt;&#x2F;code&gt;是一个&lt;code&gt;drm_mode_object&lt;&#x2F;code&gt;：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#65737e;&quot;&gt;&#x2F;**
+         * @head:
+         *
+         * List of all connectors on a @dev, linked from
+         * &amp;amp;drm_mode_config.connector_list. Protected by
+         * &amp;amp;drm_mode_config.connector_list_lock, but please only use
+         * &amp;amp;drm_connector_list_iter to walk this list.
+         *&#x2F;
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; list_head head;
+
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#65737e;&quot;&gt;&#x2F;** @base: base KMS object *&#x2F;
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; drm_mode_object base;
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;从这里之后，与&lt;code&gt;drm_connector&lt;&#x2F;code&gt;相关的分析主要以逻辑功能进行划分，而不应采取线性分析的方式。每一个&lt;code&gt;drm_connector&lt;&#x2F;code&gt;都应该定义一个类型，并保存在&lt;code&gt;drm_connector&lt;&#x2F;code&gt;中：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#65737e;&quot;&gt;&#x2F;**
+         * @connector_type:
+         * one of the DRM_MODE_CONNECTOR_&amp;lt;foo&amp;gt; types from drm_mode.h
+         *&#x2F;
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;int&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; connector_type;
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#65737e;&quot;&gt;&#x2F;** @connector_type_id: index into connector type enum *&#x2F;
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;int&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; connector_type_id;
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;内核支持的&lt;code&gt;drm_connector&lt;&#x2F;code&gt;类型是uapi的一部分，定义在&lt;code&gt;include&#x2F;uapi&#x2F;drm&#x2F;drm_mode.h&lt;&#x2F;code&gt;中：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;#define &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;DRM_MODE_CONNECTOR_Unknown      &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;0
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;#define &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;DRM_MODE_CONNECTOR_VGA          &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;1
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;#define &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;DRM_MODE_CONNECTOR_DVII         &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;2
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;#define &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;DRM_MODE_CONNECTOR_DVID         &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;3
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;#define &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;DRM_MODE_CONNECTOR_DVIA         &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;4
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;#define &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;DRM_MODE_CONNECTOR_Composite    &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;5
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;#define &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;DRM_MODE_CONNECTOR_SVIDEO       &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;6
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;#define &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;DRM_MODE_CONNECTOR_LVDS         &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;7
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;#define &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;DRM_MODE_CONNECTOR_Component    &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;8
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;#define &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;DRM_MODE_CONNECTOR_9PinDIN      &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;9
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;#define &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;DRM_MODE_CONNECTOR_DisplayPort  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;10
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;#define &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;DRM_MODE_CONNECTOR_HDMIA        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;11
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;#define &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;DRM_MODE_CONNECTOR_HDMIB        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;12
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;#define &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;DRM_MODE_CONNECTOR_TV           &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;13
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;#define &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;DRM_MODE_CONNECTOR_eDP          &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;14
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;#define &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;DRM_MODE_CONNECTOR_VIRTUAL      &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;15
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;#define &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;DRM_MODE_CONNECTOR_DSI          &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;16
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;#define &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;DRM_MODE_CONNECTOR_DPI          &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;17
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;#define &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;DRM_MODE_CONNECTOR_WRITEBACK    &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;18
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;很明显，connector驱动在初始化一个connector的时候应该设置connector的类型。与其他的drm对象类似，&lt;code&gt;drm_connector&lt;&#x2F;code&gt;的创建者需要提供一组回调函数，由于实现connector需要支持的一组操作：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#65737e;&quot;&gt;&#x2F;** @funcs: connector control functions *&#x2F;
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;const struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; drm_connector_funcs *funcs;
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;&lt;h3 id=&quot;drm-helper-probe-single-connector-modes&quot;&gt;drm_helper_probe_single_connector_modes&lt;&#x2F;h3&gt;
+&lt;p&gt;函数是一个helper，用于提供默认的&lt;code&gt;drm_connector_funcs-&amp;gt;fill_modes&lt;&#x2F;code&gt;实现。本质上函数实现了对connector支持的&lt;code&gt;drm_display_mode&lt;&#x2F;code&gt;的扫描。从函数的注释中，可以看到函数进行的操作大致为：&lt;&#x2F;p&gt;
+&lt;ol&gt;
+&lt;li&gt;将connector中现有&lt;code&gt;modes&lt;&#x2F;code&gt;列表中的&lt;code&gt;drm_display_mode&lt;&#x2F;code&gt;全部标记为&lt;code&gt;MODE_STALE&lt;&#x2F;code&gt;状态&lt;&#x2F;li&gt;
+&lt;li&gt;从以下三个来源收集&lt;code&gt;drm_display_mode&lt;&#x2F;code&gt;，并使用&lt;code&gt;drm_mode_probed_add&lt;&#x2F;code&gt;函数添加到&lt;code&gt;probed_list&lt;&#x2F;code&gt;中：
+&lt;ul&gt;
+&lt;li&gt;&amp;amp;drm_connector_helper_funcs.get_modes回调函数&lt;&#x2F;li&gt;
+&lt;li&gt;如果&lt;code&gt;drm_connector&lt;&#x2F;code&gt;目前已经连接，则加入VESA标准DMT模式&lt;code&gt;1024 x 768&lt;&#x2F;code&gt;（这个就是VGA接口没插稳检测不到EDID时分辨率变&lt;code&gt;1024x768&lt;&#x2F;code&gt;的原因了吧）&lt;&#x2F;li&gt;
+&lt;li&gt;从内核命令行参数&lt;code&gt;video=&lt;&#x2F;code&gt;读取并生成&lt;code&gt;drm_display_mode&lt;&#x2F;code&gt;&lt;&#x2F;li&gt;
+&lt;&#x2F;ul&gt;
+&lt;&#x2F;li&gt;
+&lt;li&gt;将probed_list中的&lt;code&gt;drm_display_mode&lt;&#x2F;code&gt;移动到&lt;code&gt;modes&lt;&#x2F;code&gt;列表中，并合并冲突项&lt;&#x2F;li&gt;
+&lt;li&gt;验证非STALE状态&lt;code&gt;drm_display_mode&lt;&#x2F;code&gt;的合法性&lt;&#x2F;li&gt;
+&lt;li&gt;将所有非法的&lt;code&gt;drm_display_mode&lt;&#x2F;code&gt;从&lt;code&gt;modes&lt;&#x2F;code&gt;列表中删除&lt;&#x2F;li&gt;
+&lt;&#x2F;ol&gt;
+&lt;h3 id=&quot;hotplugjian-ce&quot;&gt;hotplug检测&lt;&#x2F;h3&gt;
+&lt;p&gt;&lt;code&gt;drm_connector&lt;&#x2F;code&gt;支持hotplug且DRM中提供了相应的helper，简化实现。目前主要的helper有：&lt;&#x2F;p&gt;
+&lt;ul&gt;
+&lt;li&gt;drm_kms_helper_poll_init()用于提供轮询检测支持&lt;&#x2F;li&gt;
+&lt;li&gt;drm_helper_hpd_irq_event()用于提供中断检测支持&lt;&#x2F;li&gt;
+&lt;&#x2F;ul&gt;
+&lt;p&gt;下面就来分析DRM对于轮询检测的helper实现。可以看到，该helper的实现非常简单，其基本原理是创建一个delayed_work并使能：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;void &lt;&#x2F;span&gt;&lt;span style=&quot;color:#8fa1b3;&quot;&gt;drm_kms_helper_poll_init&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; drm_device *&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;dev&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;)
+{
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;INIT_DELAYED_WORK&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(&amp;amp;dev-&amp;gt;mode_config.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;output_poll_work&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;, output_poll_execute);
+        dev-&amp;gt;mode_config.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;poll_enabled &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;true&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;;
+
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;drm_kms_helper_poll_enable&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(dev);
+}
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;而&lt;code&gt;drm_kms_helper_poll_enable&lt;&#x2F;code&gt;函数很明显就是用于重置并使能这个delayed_work。注意这个函数的调用参数为&lt;code&gt;drm_device&lt;&#x2F;code&gt;，也就是这个机制整个就是应用于一个&lt;code&gt;drm_device&lt;&#x2F;code&gt;的。在分析这个函数之前，可以发现一个模块参数&lt;code&gt;drm.poll&lt;&#x2F;code&gt;，用于控制轮询的行为：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;static bool&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; drm_kms_helper_poll = &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;true&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;;
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;module_param_named&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(poll, drm_kms_helper_poll, &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;bool&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;, &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;0600&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;);
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;&lt;code&gt;drm_kms_helper_poll_enable&lt;&#x2F;code&gt;函数首先检查是否能够开启轮询模式，条件如下：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;if &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(!dev-&amp;gt;mode_config.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;poll_enabled &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;|| !drm_kms_helper_poll)
+                &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;return&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;;
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;也就是说，&lt;code&gt;drm.poll&lt;&#x2F;code&gt;模块参数可以直接影响轮询的行为。随后函数遍历所有的&lt;code&gt;drm_connector&lt;&#x2F;code&gt;，然后决定是否需要进行轮询：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;drm_connector_list_iter_begin&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(dev, &amp;amp;conn_iter);
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;drm_for_each_connector_iter&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(connector, &amp;amp;conn_iter) {
+                &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;if &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(connector-&amp;gt;polled &amp;amp; (DRM_CONNECTOR_POLL_CONNECT |
+                                         DRM_CONNECTOR_POLL_DISCONNECT))
+                        poll = &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;true&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;;
+        }
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;drm_connector_list_iter_end&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(&amp;amp;conn_iter);
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;这里注意到&lt;code&gt;drm_connector.polled&lt;&#x2F;code&gt;字段，它表示一个&lt;code&gt;drm_connector&lt;&#x2F;code&gt;的轮询模式，是一个bitflag，有如下三位：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;         * DRM_CONNECTOR_POLL_HPD
+         *     The connector generates hotplug events and doesn&amp;#39;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;t need to be
+         *     periodically polled. The CONNECT and DISCONNECT flags must not
+         *     be set together with the HPD flag.
+         *
+         * DRM_CONNECTOR_POLL_CONNECT
+         *     Periodically poll the connector for connection.
+         *
+         * DRM_CONNECTOR_POLL_DISCONNECT
+         *     Periodically poll the connector for disconnection, without
+         *     causing flickering even when the connector is in use. DACs should
+         *     rarely do this without a lot of testing.
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;简单来说就是检测所有的&lt;code&gt;drm_connector&lt;&#x2F;code&gt;中是否有需要轮询检测状态的，如果有则开启轮询。函数最后根据检测的结果打开轮询：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;if &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(poll)
+                &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;schedule_delayed_work&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(&amp;amp;dev-&amp;gt;mode_config.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;output_poll_work&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;, delay);
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;默认情况下，第一次进行轮询的delay为1秒，否则为10秒：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;#define &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;DRM_OUTPUT_POLL_PERIOD (&lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;10&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;*HZ)
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;前面看到delayed_work的回调函数为&lt;code&gt;output_poll_execute&lt;&#x2F;code&gt;，函数的实现还是比较简单的。函数遍历&lt;code&gt;drm_device&lt;&#x2F;code&gt;所有的&lt;code&gt;drm_connector&lt;&#x2F;code&gt;，然后找到需要进行轮询的设备，并调用&lt;code&gt;drm_helper_probe_detect&lt;&#x2F;code&gt;检测这个&lt;code&gt;drm_connector&lt;&#x2F;code&gt;的状态。而&lt;code&gt;drm_helper_probe_detect&lt;&#x2F;code&gt;仅仅是调用了&lt;code&gt;drm_connector_helper_funcs&lt;&#x2F;code&gt;中注册的&lt;code&gt;detect_ctx&lt;&#x2F;code&gt;和&lt;code&gt;detect&lt;&#x2F;code&gt;回调函数。&lt;&#x2F;p&gt;
+&lt;p&gt;对于支持中断的&lt;code&gt;drm_connector&lt;&#x2F;code&gt;，如果它是粗粒度的，即无法判断哪一个&lt;code&gt;drm_connector&lt;&#x2F;code&gt;状态发生了改变，则驱动开发者可以在进程上下文调用&lt;code&gt;drm_helper_hpd_irq_event&lt;&#x2F;code&gt;函数，检测所有标记了&lt;code&gt;DRM_CONNECTOR_POLL_HPD&lt;&#x2F;code&gt;的&lt;code&gt;drm_connector&lt;&#x2F;code&gt;。反之，则开发这可以自行调用&lt;code&gt;drm_kms_helper_hotplug_event&lt;&#x2F;code&gt;函数处理该事件。&lt;code&gt;drm_kms_helper_hotplug_event&lt;&#x2F;code&gt;的主要行为是发送uevent到用户态，并调用&lt;code&gt;dev-&amp;gt;mode_config.funcs-&amp;gt;output_poll_changed&lt;&#x2F;code&gt;回调函数。&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;yong-hu-tai-diao-yong-lu-jing&quot;&gt;用户态调用路径&lt;&#x2F;h2&gt;
+&lt;p&gt;对于与&lt;code&gt;drmModeSetCrtc&lt;&#x2F;code&gt;相关的legacy接口，其最终都调用到了IOCTL上：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;return &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;DRM_IOCTL&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(fd, DRM_IOCTL_MODE_SETCRTC, &amp;amp;crtc);
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;而所有与drm相关的定义都在&lt;code&gt;drivers&#x2F;gpu&#x2F;drm&#x2F;drm_ioctl.c&lt;&#x2F;code&gt;中：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;DRM_IOCTL_DEF&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(DRM_IOCTL_MODE_SETCRTC, drm_mode_setcrtc, DRM_MASTER),
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;可以知道它的处理函数是&lt;code&gt;drm_mode_setcrtc&lt;&#x2F;code&gt;。函数首先检查DRM设备的feature：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;if &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(!&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;drm_core_check_feature&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(dev, DRIVER_MODESET))
+                &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;return &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;-EOPNOTSUPP;
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;忽略到中间的处理可以看到：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;if &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;drm_drv_uses_atomic_modeset&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(dev))
+                ret = crtc-&amp;gt;funcs-&amp;gt;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;set_config&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(&amp;amp;set, &amp;amp;ctx);
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;else
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;                ret = &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;__drm_mode_set_config_internal&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(&amp;amp;set, &amp;amp;ctx);
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;对于支持A-KMS的驱动来说，我们最终调用的就是&lt;code&gt;drm_crtc_funcs-&amp;gt;set_config&lt;&#x2F;code&gt;回调函数，也就是&lt;code&gt;drm_atomic_helper_set_config&lt;&#x2F;code&gt;函数。&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;static inline bool &lt;&#x2F;span&gt;&lt;span style=&quot;color:#8fa1b3;&quot;&gt;drm_drv_uses_atomic_modeset&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; drm_device *&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;dev&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;)
+{
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;return &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;drm_core_check_feature&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(dev, DRIVER_ATOMIC) ||
+                (dev-&amp;gt;mode_config.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;funcs &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;&amp;amp;&amp;amp; dev-&amp;gt;mode_config.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;funcs&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;-&amp;gt;atomic
+_commit != &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;NULL&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;);
+}
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;用户态A-KMS调用的入口函数&lt;code&gt;drmModeAtomicCommit&lt;&#x2F;code&gt;内部使用了不同的IOCTL调用：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;        ret = &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;DRM_IOCTL&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(fd, DRM_IOCTL_MODE_ATOMIC, &amp;amp;atomic);
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;对应到内核态：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;DRM_IOCTL_DEF&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(DRM_IOCTL_MODE_ATOMIC, drm_mode_atomic_ioctl, DRM_MASTER),
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;该函数就是A-KMS在内核对应的处理函数，主要进行如下的操作：&lt;&#x2F;p&gt;
+&lt;ol&gt;
+&lt;li&gt;检查DRM设备是否设置&lt;code&gt;DRIVER_ATOMIC&lt;&#x2F;code&gt;标志，没有设置报错退出&lt;&#x2F;li&gt;
+&lt;li&gt;检查用户态是否使能了A-KMS相关的API，没有使能报错退出&lt;&#x2F;li&gt;
+&lt;li&gt;处理用户态传入的flags如PAGE_FLIP_ASYNC，ATOMIC_TEST_ONLY，PAGE_FLIP_EVENT等&lt;&#x2F;li&gt;
+&lt;li&gt;申请一个新的atomic_mode_state，将用户态传入的property拷贝并设置到新的state上&lt;&#x2F;li&gt;
+&lt;li&gt;最后根据flags中是否允许阻塞调用&lt;code&gt;drm_atomic_commit&lt;&#x2F;code&gt;或者&lt;code&gt;drm_atomic_nonblocking_commit&lt;&#x2F;code&gt;函数&lt;&#x2F;li&gt;
+&lt;&#x2F;ol&gt;
+&lt;h2 id=&quot;statedui-xiang&quot;&gt;State对象&lt;&#x2F;h2&gt;
+&lt;p&gt;state是什么？这里的state是DRM框架用来追踪显示pipeline各个组件状态的状态集合。一个DRM显示pipeline的整体状态由&lt;code&gt;struct drm_atomic_state&lt;&#x2F;code&gt;表示：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;drm_atomic_state {
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; kref ref;
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;drm_device *dev;
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;bool&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; allow_modeset : &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;1&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;;
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;bool&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; legacy_cursor_update : &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;1&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;;
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;bool&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; async_update : &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;1&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;;
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;bool&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; duplicated : &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;1&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;;
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;__drm_planes_state *planes;
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;__drm_crtcs_state *crtcs;
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;int&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; num_connector;
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;__drm_connnectors_state *connectors;
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;int&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; num_private_objs;
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;__drm_private_objs_state *private_objs;
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;drm_modeset_acquire_ctx *acquire_ctx;
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;drm_crtc_commit *fake_commit;
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; work_struct commit_work;
+};
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;可以看到他由每个独立的组件（即drm object）的状态对象组成。&lt;&#x2F;p&gt;
+&lt;h3 id=&quot;statede-chuang-jian&quot;&gt;State的创建&lt;&#x2F;h3&gt;
+&lt;p&gt;&lt;code&gt;drm_atomic_state&lt;&#x2F;code&gt;的创建由&lt;code&gt;drm_atomic_state_alloc&lt;&#x2F;code&gt;实现。函数中可以看到，&lt;code&gt;drm_mode_config_funcs&lt;&#x2F;code&gt;中提供了名为&lt;code&gt;atomic_state_alloc&lt;&#x2F;code&gt;的hook，允许我们自己实现state对象的创建。在默认情况下，函数会调用简单分配内存，然后使用&lt;code&gt;drm_atomic_state_init&lt;&#x2F;code&gt;进行初始化。初始化函数仅仅是简单分配分配&lt;code&gt;drm_atomic_state&lt;&#x2F;code&gt;中几个指针指向的内存区域。&lt;&#x2F;p&gt;
+&lt;p&gt;对于各个drm object对应的state，其创建操作由其对应的&lt;code&gt;drm_{object}_funcs-&amp;gt;atomic_duplicate_state&lt;&#x2F;code&gt;实现，在驱动程序没有扩展&lt;code&gt;drm_atomic_state&lt;&#x2F;code&gt;的情况下，这个回调函数一般填写为&lt;code&gt;drm_atomic_helper_{object}_duplicate_state&lt;&#x2F;code&gt;。而在commit过程中，是由&lt;code&gt;drm_atomic_get_{object}_state&lt;&#x2F;code&gt;函数触发这个创建操作的。该函数触发复制state操作后，还会将复制后的state及原本的state填入&lt;code&gt;drm_atomic_state&lt;&#x2F;code&gt;中对应的&lt;code&gt;__drm_{object}_state&lt;&#x2F;code&gt;中。&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;__drm_{object}_state {
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; drm_{object} *ptr;
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; drm_{object}_state *state, *old_state, *new_state;
+    
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#65737e;&quot;&gt;&#x2F;* extra fields may exist *&#x2F;
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;};
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;这里的&lt;code&gt;old_state&lt;&#x2F;code&gt;保存&lt;code&gt;drm_{object}&lt;&#x2F;code&gt;现有的state，而&lt;code&gt;state&lt;&#x2F;code&gt;及&lt;code&gt;new_state&lt;&#x2F;code&gt;就保存我们复制后的state。&lt;&#x2F;p&gt;
+&lt;p&gt;最后描述一下commit时创建state的简单流程：&lt;&#x2F;p&gt;
+&lt;ul&gt;
+&lt;li&gt;drm_mode_atomic_ioctl函数中会将用户态传入的property更新依次调用drm_atomic_set_property写入前面创建的&lt;code&gt;drm_atomic_state&lt;&#x2F;code&gt;&lt;&#x2F;li&gt;
+&lt;li&gt;drm_atomic_set_property函数会根据传入object的类型调用对应的&lt;code&gt;drm_atomic_get_{object}_state&lt;&#x2F;code&gt;函数，得到对应于该object类型的&lt;code&gt;drm_{object}_state&lt;&#x2F;code&gt;。在这个调用中，如果&lt;code&gt;drm_atomic_mode&lt;&#x2F;code&gt;中对应的&lt;code&gt;__drm_{object}_state&lt;&#x2F;code&gt;不存在，则复制原有的state并填入其中&lt;&#x2F;li&gt;
+&lt;li&gt;随后&lt;code&gt;drm_atomic_set_property&lt;&#x2F;code&gt;会调用&lt;code&gt;drm_atomic_{object}_set_property&lt;&#x2F;code&gt;将属性更新写入到新的state当中&lt;&#x2F;li&gt;
+&lt;li&gt;最后drm_mode_atomic_ioctl调用对应函数（&lt;code&gt;drm_atomic_commit&lt;&#x2F;code&gt;及其非阻塞版本）进行commit操作（该操作前提是没有设置TEST_ONLY的标志）&lt;&#x2F;li&gt;
+&lt;&#x2F;ul&gt;
+&lt;h3 id=&quot;stategeng-xin&quot;&gt;state更新&lt;&#x2F;h3&gt;
+&lt;p&gt;state更新由&lt;code&gt;drm_atomic_{object}_set_property&lt;&#x2F;code&gt;函数实现。目前我们看到的state更新是作为一个整体出现的，即通过用户态的commit操作触发。事实上DRM还支持partial update，支持单独对某个object进行更新操作，后面会分析清楚。&lt;&#x2F;p&gt;
+&lt;h3 id=&quot;statede-commit&quot;&gt;state的commit&lt;&#x2F;h3&gt;
+&lt;p&gt;上面看到真正的commit操作由&lt;code&gt;drm_atomic_commit&lt;&#x2F;code&gt;函数实现。该函数的实现也比较简单：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;int &lt;&#x2F;span&gt;&lt;span style=&quot;color:#8fa1b3;&quot;&gt;drm_atomic_commit&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; drm_atomic_state *&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;state&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;)
+{
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; drm_mode_config *config = &amp;amp;state-&amp;gt;dev-&amp;gt;mode_config;
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;int&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; ret;
+
+        ret = &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;drm_atomic_check_only&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(state);
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;if &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(ret)
+                &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;return&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; ret;
+
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;DRM_DEBUG_ATOMIC&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(&amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;committing &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;%p&lt;&#x2F;span&gt;&lt;span style=&quot;color:#96b5b4;&quot;&gt;\n&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;&amp;quot;, state);
+
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;return&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; config-&amp;gt;funcs-&amp;gt;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;atomic_commit&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(state-&amp;gt;dev, state, &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;false&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;);
+}
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;主要分为检查state合法性和调用&lt;code&gt;drm_mode_config_funcs-&amp;gt;atomic_commit&lt;&#x2F;code&gt;函数进行commit操作。默认情况下，atomic_commit回调函数的功能是由&lt;code&gt;drm_atomic_helper_commit&lt;&#x2F;code&gt;实现的。函数内部有两个code path：阻塞和非阻塞，我们主要讨论阻塞情况下的实现。在阻塞情况下，函数会直接调用&lt;code&gt;drm_mode_config_helpers-&amp;gt;atomic_commit_tail&lt;&#x2F;code&gt;函数。A-KMS中实现了一个标准的helper：&lt;code&gt;drm_atomic_helper_commit_tail&lt;&#x2F;code&gt;。而该helper又由更多的helper组成，因此想要真正理解A-KMS中commit操作的大致流程，需要分析这些helper实现的功能及调用的约定。&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;void &lt;&#x2F;span&gt;&lt;span style=&quot;color:#8fa1b3;&quot;&gt;drm_atomic_helper_commit_tail&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; drm_atomic_state *&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;old_state&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;)
+{
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; drm_device *dev = old_state-&amp;gt;dev;
+
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;drm_atomic_helper_commit_modeset_disables&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(dev, old_state);
+
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;drm_atomic_helper_commit_planes&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(dev, old_state, &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;0&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;);
+
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;drm_atomic_helper_commit_modeset_enables&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(dev, old_state);
+
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;drm_atomic_helper_fake_vblank&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(old_state);
+
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;drm_atomic_helper_commit_hw_done&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(old_state);
+
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;drm_atomic_helper_wait_for_vblanks&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(dev, old_state);
+
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;drm_atomic_helper_cleanup_planes&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(dev, old_state);
+}
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;&lt;h3 id=&quot;drm-atomic-helper-commit-modeset-disables&quot;&gt;drm_atomic_helper_commit_modeset_disables&lt;&#x2F;h3&gt;
+&lt;p&gt;该helper的作用是关闭所有的&lt;&#x2F;p&gt;
+&lt;p&gt;TODO: check_only&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;atomic-modeset-helperhan-shu-fen-xi&quot;&gt;Atomic Modeset Helper函数分析&lt;&#x2F;h2&gt;
+&lt;h3 id=&quot;jia-gou&quot;&gt;架构&lt;&#x2F;h3&gt;
+&lt;ol&gt;
+&lt;li&gt;去libdrm里找找看A-KMS的IOCTL接口与legacy到底有什么不同没有&lt;&#x2F;li&gt;
+&lt;li&gt;假设有不同，那么IOCTL就是有两套接口。对于legacy接口，走原先legacy那套，其对应callback由Atomic Modeset Helper函数实现。对于A-KMS接口，其对应接口也由对应Helper实现。也就是说，Helper是框架中的一部分。&lt;&#x2F;li&gt;
+&lt;li&gt;现在已经都是用新的A-KMS接口了，我认为legacy不用花大功夫去分析。&lt;&#x2F;li&gt;
+&lt;&#x2F;ol&gt;
+&lt;p&gt;整体架构为：&lt;&#x2F;p&gt;
+&lt;ul&gt;
+&lt;li&gt;原先legacy的callback保留，但是基本由A-KMS提供的公共helper实现&lt;&#x2F;li&gt;
+&lt;li&gt;公共helper依赖与对应KMS object中保存的private_helper实现功能&lt;&#x2F;li&gt;
+&lt;li&gt;驱动程序在注册KMS object时必须初始化legacy callback和private_helper，否则无法正常工作&lt;&#x2F;li&gt;
+&lt;&#x2F;ul&gt;
+&lt;p&gt;以CRTC举例，如下：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;static const struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; drm_crtc_funcs virtio_gpu_crtc_funcs = {
+        .&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;set_config             &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= drm_atomic_helper_set_config,
+        .&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;destroy                &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= drm_crtc_cleanup,
+
+        .&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;page_flip              &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= drm_atomic_helper_page_flip,
+        .&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;reset                  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= drm_atomic_helper_crtc_reset,
+        .&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;atomic_duplicate_state &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= drm_atomic_helper_crtc_duplicate_state,
+        .&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;atomic_destroy_state   &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= drm_atomic_helper_crtc_destroy_state,
+};
+
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;static const struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; drm_crtc_helper_funcs virtio_gpu_crtc_helper_funcs = {
+        .&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;mode_set_nofb &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= virtio_gpu_crtc_mode_set_nofb,
+        .&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;atomic_check  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= virtio_gpu_crtc_atomic_check,
+        .&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;atomic_flush  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= virtio_gpu_crtc_atomic_flush,
+        .&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;atomic_enable &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= virtio_gpu_crtc_atomic_enable,
+        .&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;atomic_disable &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= virtio_gpu_crtc_atomic_disable,
+};
+
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;static int &lt;&#x2F;span&gt;&lt;span style=&quot;color:#8fa1b3;&quot;&gt;vgdev_output_init&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; virtio_gpu_device *&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;vgdev&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;, &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;int &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;index&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;)
+{
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#65737e;&quot;&gt;&#x2F;&#x2F; ......
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;drm_crtc_init_with_planes&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(dev, crtc, primary, cursor,
+                                  &amp;amp;virtio_gpu_crtc_funcs, &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;NULL&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;);
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;drm_crtc_helper_add&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(crtc, &amp;amp;virtio_gpu_crtc_helper_funcs);
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#65737e;&quot;&gt;&#x2F;&#x2F; ......
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;}
+
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;&lt;h3 id=&quot;drm-atomic-helper-check&quot;&gt;drm_atomic_helper_check&lt;&#x2F;h3&gt;
+&lt;p&gt;从前面我们看到，A-KMS的主要操作主要分为两个：&lt;&#x2F;p&gt;
+&lt;ul&gt;
+&lt;li&gt;检查显示mode的合法性，确认硬件确实在该mode下正常工作&lt;&#x2F;li&gt;
+&lt;li&gt;commit操作，将硬件完整的设置成对应的状态&lt;&#x2F;li&gt;
+&lt;&#x2F;ul&gt;
+&lt;p&gt;而&lt;code&gt;drm_atomic_helper_check&lt;&#x2F;code&gt;就是一般情况下&lt;code&gt;drm_mode_config_funcs-&amp;gt;atomic_check&lt;&#x2F;code&gt;内的回调函数。其主要包含两个大的功能点：&lt;&#x2F;p&gt;
+&lt;ul&gt;
+&lt;li&gt;drm_atomic_helper_check_modeset&lt;&#x2F;li&gt;
+&lt;li&gt;drm_atomic_helper_check_planes&lt;&#x2F;li&gt;
+&lt;&#x2F;ul&gt;
+&lt;p&gt;前者逐级调用CRTC下面组件的&lt;code&gt;atomic_check&lt;&#x2F;code&gt;回调函数，确认modeset是否合法。&lt;&#x2F;p&gt;
+</content>
+	</entry>
+	<entry xml:lang="en">
+		<title>Mutter实现分析：Atomic Modesetting</title>
+		<published>2020-09-29T00:00:00+00:00</published>
+		<updated>2020-09-29T00:00:00+00:00</updated>
+		<link href="https://crab2313.github.io/mutter-a-kms/" type="text/html"/>
+		<id>https://crab2313.github.io/mutter-a-kms/</id>
+		<content type="html">&lt;p&gt;首先注意一个名字上的区分，一开始看代码的人可能会对命名有疑惑。在Jonas的设计中，整个KMS相关代码分为两个上下文：main和impl。main上下文就是mutter运行的上下文，即GMainLoop所在线程，而impl上下文虽然目前也运行在GMainLoop所在线程，但是从设计上就是KMS操作运行的上下文，后期可能迁移到独立线程上。因此，所有命名为Impl的类都是注册在&lt;code&gt;Impl&lt;&#x2F;code&gt;上下文的。&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;metakms&quot;&gt;MetaKms&lt;&#x2F;h2&gt;
+&lt;p&gt;该对象为简单容器，是Jonas为了实现transactional modesetting对KMS进行的抽象。transactional KMS最终的目的有两个：&lt;&#x2F;p&gt;
+&lt;ul&gt;
+&lt;li&gt;使mutter可以利用Atomic Modesetting API，更加充分高效的利用硬件特性，消除modesetting的中间状态&lt;&#x2F;li&gt;
+&lt;li&gt;使KMS API的调用主体可以为独立线程，本质上是允许KMS API的异步调用，即调用时&lt;&#x2F;li&gt;
+&lt;&#x2F;ul&gt;
+&lt;p&gt;首先明确其抽象的目标，即&lt;code&gt;transactional modesetting&lt;&#x2F;code&gt;，&lt;code&gt;transactional&lt;&#x2F;code&gt;这个词与数据库中的意义一致。即对于KMS设备进行的modesetting是原子性的，没有中间状态，要么成功要么失败，失败时不会进行任何状态更新。因此&lt;code&gt;MetaKms&lt;&#x2F;code&gt;使用&lt;code&gt;MetaKmsUpdate&lt;&#x2F;code&gt;抽象一个&lt;code&gt;transaction&lt;&#x2F;code&gt;。这套抽象目前使用普通的KMS API实现，但是只要接口移植完毕，那么即可直接调用Atomic KMS实现对应的操作。因此&lt;code&gt;MetaKms&lt;&#x2F;code&gt;作为容器也有选择后端实现的功能，但是当前的实现都为普通KMS。&lt;&#x2F;p&gt;
+&lt;p&gt;创建&lt;code&gt;MetaKms&lt;&#x2F;code&gt;对象时，需要传入一个&lt;code&gt;MetaBackend&lt;&#x2F;code&gt;，&lt;code&gt;meta_kms_new&lt;&#x2F;code&gt;函数会自行创建一个&lt;code&gt;MetaKmsImpl&lt;&#x2F;code&gt;对象：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;  kms = &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;g_object_new &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(META_TYPE_KMS, &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;NULL&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;);
+  kms-&amp;gt;backend = backend;
+  kms-&amp;gt;impl = &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;META_KMS_IMPL &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;meta_kms_impl_simple_new &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(kms, error))
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;随后会从后端中取出&lt;code&gt;MetaUdev&lt;&#x2F;code&gt;对象，然后注册两个信号的处理函数，可以看出这是为了处理GPU热插拔事件：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;  kms-&amp;gt;hotplug_handler_id =
+    &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;g_signal_connect &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(udev, &amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;hotplug&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;&amp;quot;, &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;G_CALLBACK &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(on_udev_hotplug), kms);
+  kms-&amp;gt;removed_handler_id =
+    &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;g_signal_connect &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(udev, &amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#a3be8c;&quot;&gt;device-removed&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;&amp;quot;,
+                      &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;G_CALLBACK &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(on_udev_device_removed), kms);
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;&lt;h2 id=&quot;metakmsupdate&quot;&gt;MetaKmsUpdate&lt;&#x2F;h2&gt;
+&lt;p&gt;这个结构体是transactional KMS API设计的核心。其核心思想是：&lt;&#x2F;p&gt;
+&lt;ul&gt;
+&lt;li&gt;对显示控制器的操作（即modesetting）transaction化&lt;&#x2F;li&gt;
+&lt;li&gt;每个&lt;code&gt;MetaKmsUpdate&lt;&#x2F;code&gt;即代表一个transaction，操作时将所有操作缓存到&lt;code&gt;MetaKmsUpdate&lt;&#x2F;code&gt;中&lt;&#x2F;li&gt;
+&lt;li&gt;只有commit操作时，原先cache的操作才会真正应用到显示控制器中&lt;&#x2F;li&gt;
+&lt;&#x2F;ul&gt;
+&lt;p&gt;因此，&lt;code&gt;MetaKms&lt;&#x2F;code&gt;会保存一个当前的&lt;code&gt;MetaKmsUpdate&lt;&#x2F;code&gt;，所有需要进行的KMS操作都需要缓存到其中，然后在合适的时机进行commit。&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;_MetaKmsUpdate
+{
+  MetaKmsDevice *device;
+
+  gboolean is_sealed;
+  uint64_t sequence_number;
+
+  MetaPowerSave power_save;
+  GList *mode_sets;
+  GList *plane_assignments;
+  GList *connector_updates;
+  GList *crtc_gammas;
+
+  MetaKmsCustomPageFlipFunc custom_page_flip_func;
+  gpointer custom_page_flip_user_data;
+
+  GList *page_flip_listeners;
+  GList *result_listeners;
+};
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;在明白上述原理后，这个对象的表示也就比较容易理解了。首先&lt;code&gt;is_sealed&lt;&#x2F;code&gt;表示这个对象是否已经被封装好，即是否能够继续向其中添加操作。随后紧跟的是多个List，分别可以保存特定的一类操作。&lt;&#x2F;p&gt;
+&lt;p&gt;&lt;code&gt;MetaKms&lt;&#x2F;code&gt;提供了多个接口，用于创建、获取，并commit一个&lt;code&gt;MetaKmsUpdate&lt;&#x2F;code&gt;：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;MetaKmsUpdate * &lt;&#x2F;span&gt;&lt;span style=&quot;color:#8fa1b3;&quot;&gt;meta_kms_ensure_pending_update &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(MetaKms *&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;kms&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;);
+MetaKmsUpdate * &lt;&#x2F;span&gt;&lt;span style=&quot;color:#8fa1b3;&quot;&gt;meta_kms_get_pending_update &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(MetaKms *&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;kms&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;);
+MetaKmsFeedback * &lt;&#x2F;span&gt;&lt;span style=&quot;color:#8fa1b3;&quot;&gt;meta_kms_post_pending_update_sync &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(MetaKms *&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;kms&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;)
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;因此，&lt;code&gt;MetaKmsImpl&lt;&#x2F;code&gt;的实现的功能就显而易见了，即负责真正执行一个&lt;code&gt;MetaKmsUpdate&lt;&#x2F;code&gt;。&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;metakmsimpldevice&quot;&gt;MetaKmsImplDevice&lt;&#x2F;h2&gt;
+&lt;p&gt;为了实现&lt;code&gt;Atomic Modesetting&lt;&#x2F;code&gt;，首先需要抽象一个&lt;code&gt;KMS&lt;&#x2F;code&gt;支持的操作。&lt;code&gt;MetaKmsImplDevice&lt;&#x2F;code&gt;抽象出了这个接口：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;_MetaKmsImplDeviceClass
+{
+  GObjectClass parent_class;
+
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;void &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(* setup_drm_event_context) (MetaKmsImplDevice *impl,
+                                    drmEventContext   *drm_event_context);
+  MetaKmsFeedback * (* process_update) (MetaKmsImplDevice *impl,
+                                        MetaKmsUpdate     *update);
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;void &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(* handle_page_flip_callback) (MetaKmsImplDevice   *impl,
+                                      MetaKmsPageFlipData *page_flip_data);
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;void &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(* discard_pending_page_flips) (MetaKmsImplDevice *impl);
+};
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;并由&lt;code&gt;MetaKmsImplDeviceSimple&lt;&#x2F;code&gt;和&lt;code&gt;MetaKmsImplDeviceAtomic&lt;&#x2F;code&gt;实现。显然&lt;code&gt;handle_page_flip_callback&lt;&#x2F;code&gt;和&lt;code&gt;discard_pending_page_flips&lt;&#x2F;code&gt;与&lt;code&gt;process&lt;&#x2F;code&gt;被直接当作虚函数导出。另一个非常重要的操作是&lt;code&gt;dispatch&lt;&#x2F;code&gt;，实现如下：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;  drm_event_context = (drmEventContext) { &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;0 &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;};
+  klass-&amp;gt;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;setup_drm_event_context &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(impl_device, &amp;amp;drm_event_context);
+
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;while &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(&lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;TRUE&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;)
+    {
+      &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;if &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;drmHandleEvent &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(priv-&amp;gt;fd, &amp;amp;drm_event_context) != &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;0&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;)
+        {
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;可以看出，首先使用&lt;code&gt;setup_drm_event_context&lt;&#x2F;code&gt;回调函数设置好&lt;code&gt;drmEventContext&lt;&#x2F;code&gt;，本质上就是&lt;code&gt;page flip&lt;&#x2F;code&gt;的处理函数，在随后的&lt;code&gt;drmHandleEvent&lt;&#x2F;code&gt;中，如果出现&lt;code&gt;PageFlip&lt;&#x2F;code&gt;事件，则会调用&lt;code&gt;MetaKmsImplDeviceXXX&lt;&#x2F;code&gt;中设置好的&lt;code&gt;Page flip&lt;&#x2F;code&gt;处理函数进行处理。&lt;&#x2F;p&gt;
+&lt;p&gt;除此之外比较有意思的是这个类保存了所有的DRM设备属性，也就是&lt;code&gt;connector&lt;&#x2F;code&gt;、&lt;code&gt;CRTC&lt;&#x2F;code&gt;等KMS接口导出的对象：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;typedef struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; _MetaKmsImplDevicePrivate
+{
+  MetaKmsDevice *device;
+  MetaKmsImpl *impl;
+
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;int&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; fd;
+  GSource *fd_source;
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;char &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;*path;
+
+  GList *crtcs;
+  GList *connectors;
+  GList *planes;
+
+  MetaKmsDeviceCaps caps;
+
+  GList *fallback_modes;
+} MetaKmsImplDevicePrivate;
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;可以在该类型的初始化函数中得到对应的初始化方式，且该类型的初始化函数中还隐藏了比较重要的信息：一个&lt;code&gt;GSource&lt;&#x2F;code&gt;，如下：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;  priv-&amp;gt;fd_source =
+    &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;meta_kms_register_fd_in_impl &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;meta_kms_impl_get_kms &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(priv-&amp;gt;impl), priv-&amp;gt;fd,
+                                  kms_event_dispatch_in_impl,
+                                  impl_device);
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;本质上是在GMainContext中注册了一个&lt;code&gt;GSource&lt;&#x2F;code&gt;，以DRM的文件描述符的可读状态为事件源，以传入的&lt;code&gt;kms_event_dispatch_in_impl&lt;&#x2F;code&gt;函数作为&lt;code&gt;dispatch&lt;&#x2F;code&gt;回调函数。&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;static&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; gpointer
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#8fa1b3;&quot;&gt;kms_event_dispatch_in_impl &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(MetaKmsImpl  *&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;impl&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;,
+                            gpointer      &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;user_data&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;,
+                            GError      **&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;error&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;)
+{
+  MetaKmsImplDevice *impl_device = user_data;
+  gboolean ret;
+
+  ret = &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;meta_kms_impl_device_dispatch &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(impl_device, error);
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;return &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;GINT_TO_POINTER &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(ret);
+}
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;而在该函数中调用了&lt;code&gt;meta_kms_impl_device_dispatch&lt;&#x2F;code&gt;函数，除此之外别无它地。上述即为&lt;code&gt;Page Flip&lt;&#x2F;code&gt;的处理机制，从这里看，&lt;code&gt;MetaKmsImplDevice&lt;&#x2F;code&gt;一旦创建，即会注册&lt;code&gt;Page Flip&lt;&#x2F;code&gt;的处理函数，并进行处理。&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;metakmsimpldevicesimple&quot;&gt;MetaKmsImplDeviceSimple&lt;&#x2F;h2&gt;
+&lt;p&gt;~~这个是目前mutter唯一实现的&lt;code&gt;MetaKmsImpl&lt;&#x2F;code&gt;，~~实质上是用普通KMS（即非atomic）操作实现transacational KMS的接口。可以预见，后续mutter项目会使用Atomic KMS接口实现一个&lt;code&gt;MetaKmsImplAtomic&lt;&#x2F;code&gt;，实现事实意义上的atomic KMS支持。&lt;&#x2F;p&gt;
+&lt;p&gt;这里分析&lt;code&gt;MetaKmsImplSimple&lt;&#x2F;code&gt;几个比较复杂的操作。首先明确入口为&lt;code&gt;meta_kms_impl_simple_process_update&lt;&#x2F;code&gt;函数，其内部连续处理缓存在&lt;code&gt;MetaKmsUpdate&lt;&#x2F;code&gt;中的KMS操作。简单的操作只是简单的wrap一个&lt;code&gt;drmMode*&lt;&#x2F;code&gt;函数，可以略过，直接分析最复杂的PageFlip处理。先看其缓存在&lt;code&gt;MetaKmsUpdate&lt;&#x2F;code&gt;中的形式：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;typedef struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; _MetaKmsPageFlip
+{
+  MetaKmsCrtc *crtc;
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;const&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; MetaKmsPageFlipFeedback *feedback;
+  gpointer user_data;
+  MetaKmsCustomPageFlipFunc custom_page_flip_func;
+  gpointer custom_page_flip_user_data;
+} MetaKmsPageFlip;
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;先理解&lt;code&gt;drmModePageFlip&lt;&#x2F;code&gt;函数，该函数与&lt;code&gt;drmModeSetCrtc&lt;&#x2F;code&gt;函数非常相似，只不过其只有在VBlank事件来了时才生效，也就是告诉DRM当VBlank事件到来时，更新framebuffer。我们可以将函数的flags参数传入&lt;code&gt;DRM_MODE_PAGE_FLIP_EVENT&lt;&#x2F;code&gt;，此时每当PageFlip发生时，都会产生一个PageFlip事件。事件通过drm文件描述符变为可读告知用户态，且我们可以使用&lt;code&gt;drmHandleEvent&lt;&#x2F;code&gt;处理事件。注意&lt;code&gt;drmModePageFlip&lt;&#x2F;code&gt;的最后一个参数为&lt;code&gt;user_data&lt;&#x2F;code&gt;，一个用户态指针，每当PageFlip事件生成时，对应的指针就会跟着传入&lt;code&gt;drmHandleEvent&lt;&#x2F;code&gt;函数，所以我们可以通过该指针辨别PageFlip。&lt;&#x2F;p&gt;
+&lt;p&gt;接下来看&lt;code&gt;process_page_flip&lt;&#x2F;code&gt;函数，该函数是PageFlip处理的核心。首先可以知道&lt;code&gt;MetaKmsPageFlip&lt;&#x2F;code&gt;中提供了一个让调用方自己写PageFlip处理函数的机制，即对应于&lt;code&gt;custom_page_flip_func&lt;&#x2F;code&gt;函数指针和其对应的数据。当他们存在时，就通过它们进行PageFlip的处理，反之则使用标准的处理流程，即调用&lt;code&gt;drmModePageFlip&lt;&#x2F;code&gt;函数：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;      ret = &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;drmModePageFlip &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(fd,
+                             &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;meta_kms_crtc_get_id &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(crtc),
+                             plane_assignment-&amp;gt;fb_id,
+                             DRM_MODE_PAGE_FLIP_EVENT,
+                             &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;meta_kms_page_flip_data_ref &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(page_flip_data));
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;&lt;code&gt;page_flip_data&lt;&#x2F;code&gt;究竟记录了什么，目前不需要知道，到时候在分析mutter frame调度器的时候进行分析，目前只看到：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;  page_flip_data = &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;meta_kms_page_flip_data_new &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(impl,
+                                                crtc,
+                                                page_flip-&amp;gt;feedback,
+                                                page_flip-&amp;gt;user_data);
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;注意&lt;code&gt;drmModePageFlip&lt;&#x2F;code&gt;函数在一个VBlank期间只能调用一次，在已经调用过一次的情况下再继续调用的话会返回&lt;code&gt;-EBUSY&lt;&#x2F;code&gt;。可以看到&lt;code&gt;process_page_flip&lt;&#x2F;code&gt;函数在该情况下实现了一个缓存机制，将返回&lt;code&gt;-EBUSY&lt;&#x2F;code&gt;的调用重新调度到下一次VBlank。这里只需要看到它是将多余的PageFlip计算出一个时间间隔，并缓存到了一张表内，其余细节在分析frame调度时再分析。&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;metakmsimpldeviceatomic&quot;&gt;MetaKmsImplDeviceAtomic&lt;&#x2F;h2&gt;
+&lt;p&gt;半年之后jonas终于把&lt;code&gt;Atomic Modesetting&lt;&#x2F;code&gt;的支持做完了，不过熟悉GNOME的人都应该懂这个特性起码review半年以上，也就是mutter 40都不一定可以合入。前面提到&lt;code&gt;Atomic Modesetting&lt;&#x2F;code&gt;的支持就差最后一个&lt;code&gt;Buffer&lt;&#x2F;code&gt;，以前我对于DRM的理解没有那么深刻，结果误解了这个&lt;code&gt;Buffer&lt;&#x2F;code&gt;的含义。这个&lt;code&gt;Buffer&lt;&#x2F;code&gt;实质上是指&lt;code&gt;Buffer&lt;&#x2F;code&gt;更新，即设置CRTC的scanout。因此，需要定义一个&lt;code&gt;PlaneAssignment&lt;&#x2F;code&gt;用于抽象这个操作。&lt;&#x2F;p&gt;
+&lt;p&gt;&lt;code&gt;Atomic Modesetting&lt;&#x2F;code&gt;的实质是使用&lt;code&gt;Atomic API&lt;&#x2F;code&gt;替换掉原有的legacy接口，需要重新实现一个&lt;code&gt;MetaKmsImplDevice&lt;&#x2F;code&gt;，也就是&lt;code&gt;MetaKmsImplDeviceAtomic&lt;&#x2F;code&gt;。该函数的核心操作就是&lt;code&gt;process_update&lt;&#x2F;code&gt;，在进行这个操作时，首先自己是否已经初始化，如果没有初始化，则进行以下操作：&lt;&#x2F;p&gt;
+&lt;ul&gt;
+&lt;li&gt;MetaKmsDevice里管理的所有connector的&lt;code&gt;CRTC_ID&lt;&#x2F;code&gt;属性设置为0&lt;&#x2F;li&gt;
+&lt;li&gt;MetaKmsDevice里管理的所有plane的&lt;code&gt;CRTC_ID&lt;&#x2F;code&gt;与&lt;code&gt;FB_ID&lt;&#x2F;code&gt;设置为0&lt;&#x2F;li&gt;
+&lt;&#x2F;ul&gt;
+&lt;p&gt;随后则进行update操作，如下：&lt;&#x2F;p&gt;
+&lt;ul&gt;
+&lt;li&gt;依次处理&lt;code&gt;MetaKmsUpdate&lt;&#x2F;code&gt;中保存的信息，本质上就是更改对应Object里的属性&lt;&#x2F;li&gt;
+&lt;li&gt;然后commit&lt;&#x2F;li&gt;
+&lt;&#x2F;ul&gt;
+&lt;h2 id=&quot;metakmsdevice&quot;&gt;MetaKmsDevice&lt;&#x2F;h2&gt;
+&lt;p&gt;&lt;del&gt;没意思。&lt;&#x2F;del&gt;&lt;&#x2F;p&gt;
+&lt;p&gt;有意思了，原先没有看到PageFlip事件的处理在&lt;code&gt;MetaKmsDevice&lt;&#x2F;code&gt;里，单纯以为其是drm设备文件描述符的容器。漏掉了最重要的函数&lt;code&gt;meta_kms_device_dispatch_sync&lt;&#x2F;code&gt;。先分析通用实现，然后再看&lt;code&gt;MetaKmsImplDevice&lt;&#x2F;code&gt;。&lt;&#x2F;p&gt;
+&lt;p&gt;可以看到函数首先调用&lt;code&gt;MetaKmsImpl&lt;&#x2F;code&gt;的&lt;code&gt;meta_kms_impl_dispatch_idle&lt;&#x2F;code&gt;函数，后续调用了&lt;code&gt;MetaKmsImplDevice&lt;&#x2F;code&gt;实现的&lt;code&gt;dispatch&lt;&#x2F;code&gt;函数，中间穿插了&lt;code&gt;meta_kms_flush_callback&lt;&#x2F;code&gt;的调用。&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;metacursorrenderer&quot;&gt;MetaCursorRenderer&lt;&#x2F;h2&gt;
+&lt;p&gt;来看个比较独立也看起来比较简单的东西吧：鼠标光标绘制。首先看通用的抽象即&lt;code&gt;MetaCursorRender&lt;&#x2F;code&gt;。首先明确光标绘制的两种方式，硬件光标和软件光标。首先说软件光标，这个比较好理解，即直接在屏幕上进行光标的绘制，与绘制窗口无异。硬件光标则不同，目前的显示控制器一般都实现了cursor图层（plane），即屏幕的主图层和cursor图层是相互独立的，只有在scanout的时候才由硬件进行叠加操作。cursor图层一般支持绘制一块比较小的bitmap到屏幕上，而该bimtap可以在屏幕上快速移动。但是硬件实现的cursor图层是有局限性的，特定情况下并不能启用，所以mutter需要管理硬件cursor的启用。&lt;&#x2F;p&gt;
+&lt;p&gt;事实上通过简单思考即抽象出Cursor管理需要向外提供的接口：&lt;&#x2F;p&gt;
+&lt;ul&gt;
+&lt;li&gt;光标（相对屏幕）位置的设置和获取&lt;&#x2F;li&gt;
+&lt;li&gt;硬件光标的启用与停用管理&lt;&#x2F;li&gt;
+&lt;li&gt;光标位图设置&lt;&#x2F;li&gt;
+&lt;li&gt;光标更新（绘制）&lt;&#x2F;li&gt;
+&lt;&#x2F;ul&gt;
+&lt;p&gt;mutter使用&lt;code&gt;MetaCursorRender&lt;&#x2F;code&gt;抽象cursor的绘制器，而使用&lt;code&gt;MetaCursorSprite&lt;&#x2F;code&gt;描述光标图片（注意，这个可以是动画）。为了管理硬件cursor的启用条件，定义了&lt;code&gt;MetaHwCursorInhibitor&lt;&#x2F;code&gt;接口，实现了该接口的对象可以提供一个函数用于确定是否可以启用硬件cursor。&lt;&#x2F;p&gt;
+&lt;p&gt;可以看到&lt;code&gt;MetaCursorRender&lt;&#x2F;code&gt;向外提供的接口如下：&lt;&#x2F;p&gt;
+&lt;ul&gt;
+&lt;li&gt;set_curosr&#x2F;get_cursor，更换和获取`MetaCursorSprite（并绘制）&lt;&#x2F;li&gt;
+&lt;li&gt;set_position&#x2F;get_position，更该和获取光标位置（并绘制）&lt;&#x2F;li&gt;
+&lt;li&gt;force_update，强制重新绘制光标&lt;&#x2F;li&gt;
+&lt;li&gt;{is，add，remove}_hw_cursor_inhibitor，向其注册删除&lt;code&gt;MetaHwCursorInhibitor&lt;&#x2F;code&gt;&lt;&#x2F;li&gt;
+&lt;&#x2F;ul&gt;
+&lt;p&gt;先来看一下绘制光标的抽象接口：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;if &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(cursor_sprite)
+    &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;meta_cursor_sprite_prepare_at &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(cursor_sprite,
+                                   (&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;int&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;) priv-&amp;gt;current_x,
+                                   (&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;int&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;) priv-&amp;gt;current_y);
+
+  handled_by_backend =
+    &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;META_CURSOR_RENDERER_GET_CLASS &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(renderer)-&amp;gt;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;update_cursor &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(renderer,
+                                                              cursor_sprite);
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;if &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(handled_by_backend != priv-&amp;gt;handled_by_backend)
+    {
+      priv-&amp;gt;handled_by_backend = handled_by_backend;
+      should_redraw = &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;TRUE&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;;
+    }
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;这是&lt;code&gt;meta_cursor_renderer_update_cursor&lt;&#x2F;code&gt;中的片段。其大致逻辑就是，如果子类实现的&lt;code&gt;update_cursor&lt;&#x2F;code&gt;函数没有处理光标绘制，则交由&lt;code&gt;MetaCursorRenderer&lt;&#x2F;code&gt;实现的软件绘制器进行光标绘制。&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;metadrmbuffer&quot;&gt;MetaDrmBuffer&lt;&#x2F;h2&gt;
+&lt;p&gt;Buffer管理应该是transacational KMS最后一个还没有做的部分了。很明显一个&lt;code&gt;MetaDrmBuffer&lt;&#x2F;code&gt;对应一个DRM Buffer，且其只提供一个虚函数：&lt;code&gt;get_fb_id&lt;&#x2F;code&gt;。现在看到这个类有三个实现：&lt;&#x2F;p&gt;
+&lt;ul&gt;
+&lt;li&gt;DUMB，这个就是那个几乎所有DRM驱动都支持的DUMB Buffer，不支持GPU加速，不看&lt;&#x2F;li&gt;
+&lt;li&gt;GBM，这个应该是本地GPU通过libgbm分配出来的Buffer&lt;&#x2F;li&gt;
+&lt;li&gt;Import，这个是其他GPU通过prime接口导出的Buffer，这个也暂时不看&lt;&#x2F;li&gt;
+&lt;&#x2F;ul&gt;
+&lt;p&gt;&lt;code&gt;MetaDrmBuffer&lt;&#x2F;code&gt;是一个抽象类，由于上面的&lt;code&gt;DUMB&lt;&#x2F;code&gt;和&lt;code&gt;Import&lt;&#x2F;code&gt;类型的Buffer都没有进一步分析的必要，所以这里主要分析&lt;code&gt;MetaDrmBufferGbm&lt;&#x2F;code&gt;。首先明确这个Buffer对应的是DRM中的Buffer概念，且是使用libgbm分配而出的Buffer，所以这一套API与EGL和DRM高度相关。&lt;code&gt;MetaDrmBufferGbm&lt;&#x2F;code&gt;提供了两个创建方法：&lt;&#x2F;p&gt;
+&lt;ul&gt;
+&lt;li&gt;new_lock_front。该方法对应EGL中的&lt;code&gt;lock front buffer&lt;&#x2F;code&gt;操作，本质是锁定一个gbm_surface中的一个后端Buffer然后将其返回供用户操作。一旦完成操作则需要将该Buffer返还gbm_surface并解除锁定。&lt;&#x2F;li&gt;
+&lt;li&gt;new_take。直接将一个&lt;code&gt;gbm_bo&lt;&#x2F;code&gt;包装成一个&lt;code&gt;MetaDrmBufferGbm&lt;&#x2F;code&gt;。&lt;&#x2F;li&gt;
+&lt;&#x2F;ul&gt;
+&lt;p&gt;无论使用哪个方法进行创建，都需要使用&lt;code&gt;meta_gpu_kms_add_fb&lt;&#x2F;code&gt;将整个buffer注册到DRM中，并得到一个&lt;code&gt;framebuffer id&lt;&#x2F;code&gt;并保存起来。&lt;&#x2F;p&gt;
+</content>
+	</entry>
+	<entry xml:lang="en">
+		<title>TTM内存分配器分析</title>
+		<published>2020-04-26T00:00:00+00:00</published>
+		<updated>2020-04-26T00:00:00+00:00</updated>
+		<link href="https://crab2313.github.io/ttm/" type="text/html"/>
+		<id>https://crab2313.github.io/ttm/</id>
+		<content type="html">&lt;h1 id=&quot;ttm&quot;&gt;TTM&lt;&#x2F;h1&gt;
+&lt;p&gt;本文结合QXL内的实现分析内核DRM框架中提供的TTM内存管理器。&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;bo&quot;&gt;BO&lt;&#x2F;h2&gt;
+&lt;p&gt;BO是Buffer Object的缩写，与Buffer是有区别的。个人理解BO和Buffer最大的区别就是BO比Buffer多了好几个操作，且BO的后端Buffer位置是会变化的。这是因为在GPU工作时，同一个BO可能被管理器移动到三个位置上：&lt;&#x2F;p&gt;
+&lt;ul&gt;
+&lt;li&gt;GPU的专有内存中，也称显存、VRAM&lt;&#x2F;li&gt;
+&lt;li&gt;系统内存中&lt;&#x2F;li&gt;
+&lt;li&gt;系统内存在磁盘中的缓存中&lt;&#x2F;li&gt;
+&lt;&#x2F;ul&gt;
+&lt;p&gt;因此，BO提供了这些操作的抽象。注意BO有可能被多个对象访问，如GPU和CPU，且GPU和CPU只能访问特定位置上的BO。如，GPU只能访问VRAM和（部分）系统内存中的BO。这其中的拷贝和管理就需要TTM进行。&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;ttmde-ju-xian-xing&quot;&gt;TTM的局限性&lt;&#x2F;h2&gt;
+&lt;p&gt;TTM有一大堆问题，但作为目前最成熟的codebase，基本上所有开发者都是边骂边用。目前的基本操作是使用GEM当作用户态前端，但是后端使用TTM进行。目前TTM的codebase经过多年clean up，目前还剩1w行左右。&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;chu-shi-hua&quot;&gt;初始化&lt;&#x2F;h2&gt;
+&lt;p&gt;TTM的初始化由&lt;code&gt;ttm_bo_device_init&lt;&#x2F;code&gt;函数进行，该函数会会让驱动得到一个&lt;code&gt;ttm_bo_device&lt;&#x2F;code&gt;。&lt;&#x2F;p&gt;
+&lt;p&gt;&lt;code&gt;ttm_bo_init_mm&lt;&#x2F;code&gt;负责初始化一个memory_manager。&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;ttm_bo_device {
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; list_head device_list;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;ttm_bo_driver *driver;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; ttm_mem_type_manager man[TTM_NUM_MEM_TYPES];
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;drm_vma_offset_manager *vma_manager;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; list_head ddestroy;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;address_space *dev_mapping;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; delayed_work wq;
+
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;bool&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; need_dma32;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;bool&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; no_retry;
+};
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;所有的&lt;code&gt;ttm_bo_device&lt;&#x2F;code&gt;都会放到一个&lt;code&gt;ttm_bo_global&lt;&#x2F;code&gt;上的&lt;code&gt;device_list&lt;&#x2F;code&gt;中。&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;ttm-mem-type-manager&quot;&gt;ttm_mem_type_manager&lt;&#x2F;h2&gt;
+&lt;p&gt;前面看到&lt;code&gt;ttm_bo_device&lt;&#x2F;code&gt;中保存了一个&lt;code&gt;ttm_mem_type_manager&lt;&#x2F;code&gt;数组，即用于管理多种内存类型的管理器。注意到其内部保存了一组&lt;code&gt;func&lt;&#x2F;code&gt;函数指针，该指针通常由使用TTM的驱动进行设置，一般为&lt;code&gt;ttm_bo_manager_func&lt;&#x2F;code&gt;。&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;const struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; ttm_mem_type_manager_func ttm_bo_manager_func = {
+	.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;init &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= ttm_bo_man_init,
+	.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;takedown &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= ttm_bo_man_takedown,
+	.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;get_node &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= ttm_bo_man_get_node,
+	.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;put_node &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= ttm_bo_man_put_node,
+	.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;debug &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;= ttm_bo_man_debug
+};
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;事实上DRM子系统提供了自己的内存分配器，称为&lt;code&gt;drm_mm&lt;&#x2F;code&gt;，具体信息详见&lt;a href=&quot;https:&#x2F;&#x2F;www.kernel.org&#x2F;doc&#x2F;html&#x2F;latest&#x2F;gpu&#x2F;drm-mm.html#drm-mm-range-allocator&quot;&gt;内核文档&lt;&#x2F;a&gt;。&lt;code&gt;ttm_mem_type_manager_func&lt;&#x2F;code&gt;中的回调函数使用&lt;code&gt;drm_mm&lt;&#x2F;code&gt;管理各类型的存储空间。有关于初始化的&lt;code&gt;init&lt;&#x2F;code&gt;和与之相反的&lt;code&gt;takedown&lt;&#x2F;code&gt;可以不谈，主要需要分析&lt;code&gt;get_node&lt;&#x2F;code&gt;函数，该函数为内存分配的入口函数。函数事实上的实现也很简单，仅仅是调用&lt;code&gt;drm_mm&lt;&#x2F;code&gt;的接口获取&lt;code&gt;drm_mm_node&lt;&#x2F;code&gt;并将其写入传入的&lt;code&gt;ttm_mem_reg&lt;&#x2F;code&gt;中：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;		mem-&amp;gt;mm_node = node;
+		mem-&amp;gt;start = node-&amp;gt;start;
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;注意这个&lt;code&gt;start&lt;&#x2F;code&gt;字段，后面会看到可以以它计算出BO对应的物理地址。&lt;&#x2F;p&gt;
+&lt;p&gt;除了&lt;code&gt;TTM_PL_SYSTEM&lt;&#x2F;code&gt;类型外的&lt;code&gt;ttm_mem_type_manager&lt;&#x2F;code&gt;一般由驱动程序自行初始化。初始化&lt;code&gt;ttm_mem_type_manager&lt;&#x2F;code&gt;的入口函数为&lt;code&gt;ttm_bo_init_mm&lt;&#x2F;code&gt;，该函数会调用驱动程序注册给&lt;code&gt;ttm_bo_device&lt;&#x2F;code&gt;的&lt;code&gt;ttm_bo_driver&lt;&#x2F;code&gt;上的&lt;code&gt;init_mem_type&lt;&#x2F;code&gt;函数指针初始化对应类型的内存管理器。&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;ttm-buffer-object&quot;&gt;ttm_buffer_object&lt;&#x2F;h2&gt;
+&lt;p&gt;这个对象应该是TTM管理的BO的基类，对BO的管理应该都是围绕它进行的。从这里看到TTM和GEM其是并不是独立的两个组件，&lt;code&gt;ttm_buffer_object&lt;&#x2F;code&gt;是以&lt;code&gt;drm_gem_object&lt;&#x2F;code&gt;为基类的。&lt;&#x2F;p&gt;
+&lt;p&gt;先来看明白一个结构体：&lt;code&gt;ttm_placement&lt;&#x2F;code&gt;，如下：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;ttm_placement {
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;unsigned&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;		num_placement;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;const struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;ttm_place	*placement;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;unsigned&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;		num_busy_placement;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;const struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;ttm_place	*busy_placement;
+};
+
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;ttm_place {
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;unsigned&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;	fpfn;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;unsigned&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;	lpfn;
+	uint32_t	flags;
+};
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;每个&lt;code&gt;ttm_buffer_object&lt;&#x2F;code&gt;都有与之关联的&lt;code&gt;ttmp_placement&lt;&#x2F;code&gt;，而&lt;code&gt;ttm_placement&lt;&#x2F;code&gt;的意义也很简单，即BO可以放置的位置和当空间紧张时，BO可以放置的位置。&lt;code&gt;ttm_place&lt;&#x2F;code&gt;实际上描述了一段内存区域（由起始和结束PFN描述）和一个flags。这两个结构体结合即可描述清楚BO对于存储空间的偏好。&lt;&#x2F;p&gt;
+&lt;p&gt;除此之外BO还有类型属性，即：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;enum &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;ttm_bo_type {
+	ttm_bo_type_device,
+	ttm_bo_type_kernel,
+	ttm_bo_type_sg
+};
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;这里只需要明白device和kernel的最大区别是kernel类型的BO无法被用户态进行访问。&lt;&#x2F;p&gt;
+&lt;p&gt;&lt;code&gt;ttm_bo_init&lt;&#x2F;code&gt;函数负责初始化一个&lt;code&gt;ttm_buffer_object&lt;&#x2F;code&gt;，而其内部由&lt;code&gt;ttm_bo_init_reserved&lt;&#x2F;code&gt;实现。&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;ttm-mem-reg&quot;&gt;ttm_mem_reg&lt;&#x2F;h2&gt;
+&lt;p&gt;&lt;code&gt;ttm_bo_init_reserved&lt;&#x2F;code&gt;使用&lt;code&gt;ttm_bo_validate&lt;&#x2F;code&gt;函数验证&lt;code&gt;ttm_buffer_object&lt;&#x2F;code&gt;是否在正确的位置上，如果不是，则调用move操作将其放置在正确的位置上。一个BO当前处于的存储位置由&lt;code&gt;ttm_mem_reg&lt;&#x2F;code&gt;描述：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;ttm_mem_reg {
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;void &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;*mm_node;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;unsigned long&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; start;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;unsigned long&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; size;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;unsigned long&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; num_pages;
+	uint32_t page_alignment;
+	uint32_t mem_type;
+	uint32_t placement;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; ttm_bus_placement bus;
+};
+
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;ttm_bus_placement {
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;void		&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;*addr;
+	phys_addr_t	base;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;unsigned long&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;	size;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;unsigned long&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;	offset;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;bool&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;		is_iomem;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;bool&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;		io_reserved_vm;
+	uint64_t        io_reserved_count;
+};
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;&lt;h2 id=&quot;di-zhi-kong-jian-ying-she&quot;&gt;地址空间映射&lt;&#x2F;h2&gt;
+&lt;p&gt;该操作主要指将一个BO映射到CPU的虚拟地址，该操作是BO最主要的操作之一。只有映射到虚拟地址空间，一个BO后端的Buffer才能被CPU访问，才能被应用程序操作（读写）。TTM提供了好几组工具函数，用于实现各种各样的映射，首先来看&lt;code&gt;ttm_bo_kmap&#x2F;kunmap&lt;&#x2F;code&gt;。&lt;&#x2F;p&gt;
+&lt;p&gt;提到映射，那么我们首先要明白TTM允许使用它的驱动程序注册一组callback，这组callback在映射&#x2F;取消映射时被调用，可以让驱动程序hook自己的操作。这组callback为&lt;code&gt;ttm_bo_driver&lt;&#x2F;code&gt;上的&lt;code&gt;io_mem_reserve&lt;&#x2F;code&gt;和&lt;code&gt;io_mem_free&lt;&#x2F;code&gt;。&lt;&#x2F;p&gt;
+&lt;p&gt;&lt;code&gt;ttm_bo_kmap&lt;&#x2F;code&gt;函数的主要工作为将BO映射到内核虚拟地址空间中，注意它的最后一个参数&lt;code&gt;map&lt;&#x2F;code&gt;，为一个&lt;code&gt;ttm_bo_kmap_obj&lt;&#x2F;code&gt;结构体。该结构体用于表示一个kmap映射，如下：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;#define &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;TTM_BO_MAP_IOMEM_MASK &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;0x80
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;ttm_bo_kmap_obj {
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;void &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;*virtual;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;page *page;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;enum &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;{
+		ttm_bo_map_iomap        = &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;1 &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;| TTM_BO_MAP_IOMEM_MASK,
+		ttm_bo_map_vmap         = &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;2&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;,
+		ttm_bo_map_kmap         = &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;3&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;,
+		ttm_bo_map_premapped    = &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;4 &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;| TTM_BO_MAP_IOMEM_MASK,
+	} bo_kmap_type;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;ttm_buffer_object *bo;
+};
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;很明显&lt;code&gt;virtual&lt;&#x2F;code&gt;为映射好之后的起始虚拟地址，而从后面可以看到&lt;code&gt;page&lt;&#x2F;code&gt;为kmap下映射用的&lt;code&gt;struct page&lt;&#x2F;code&gt;指针（注意kmap模式只有在映射一个page，且允许缓存时使用）。简单分析了这个参数后，来看正主。除去参数合法性检查等操作后，可以看到函数调用了&lt;code&gt;ttm_mem_io_reserve&lt;&#x2F;code&gt;，这本质就是调用了上面提到的&lt;code&gt;io_mem_reserve&lt;&#x2F;code&gt;回调函数。随后，函数根据BO是否为IO内存调用&lt;code&gt;ttm_bo_kmap_ttm&lt;&#x2F;code&gt;或者&lt;code&gt;ttm_bo_ioremap&lt;&#x2F;code&gt;。&lt;&#x2F;p&gt;
+&lt;p&gt;&lt;code&gt;ttm_bo_kmap_ttm&lt;&#x2F;code&gt;函数像前面提到的一样，在只映射一页且允许缓存的情况下使用kmap，在其他情况下使用vmap进行映射，这在&lt;code&gt;ttm_tt&lt;&#x2F;code&gt;的分析里详细看。而&lt;code&gt;ttm_bo_ioremap&lt;&#x2F;code&gt;的实现更加直观，分为两种情况：已经映射和没有映射。对于已经映射的BO，其&lt;code&gt;bo-&amp;gt;mem.bus.addr&lt;&#x2F;code&gt;不为0，则将&lt;code&gt;ttm_bo_kmap_obj&lt;&#x2F;code&gt;的类型设置为&lt;code&gt;ttm_bo_map_premapped&lt;&#x2F;code&gt;，并以该虚拟地址作为映射的虚拟地址。对于没有进行映射的BO，则根据&lt;code&gt;ttm_buffer_object&lt;&#x2F;code&gt;中的&lt;code&gt;ttm_mem_reg&lt;&#x2F;code&gt;中的&lt;code&gt;placement&lt;&#x2F;code&gt;标志中是否存在&lt;code&gt;TTM_PL_FLAG_WC&lt;&#x2F;code&gt;对物理地址调用ioremap_wc或者ioremap函数进行映射。最后一提，映射使用的物理地址通过&lt;code&gt;ttm_mem_reg.bus&lt;&#x2F;code&gt;上的&lt;code&gt;base+offset&lt;&#x2F;code&gt;计算而来。&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;ttm-mem-glob&quot;&gt;ttm_mem_glob&lt;&#x2F;h2&gt;
+&lt;p&gt;&lt;code&gt;ttm_mem_glob&lt;&#x2F;code&gt;是一个&lt;code&gt;ttm_mem_global&lt;&#x2F;code&gt;结构体，是一个单例对象，没错是全局的。这意味着无论内核中无论同时跑了多少个使用TTM的显卡驱动实例，它们都使用的是同一个&lt;code&gt;ttm_mem_glob&lt;&#x2F;code&gt;对象。首先明确&lt;code&gt;TTM&lt;&#x2F;code&gt;并没有直接调用内存子系统进行page的分配回收操作，而是增加了自己的抽象。&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;#define &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;TTM_MEM_MAX_ZONES &lt;&#x2F;span&gt;&lt;span style=&quot;color:#d08770;&quot;&gt;2
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;ttm_mem_zone;
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;extern struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;ttm_mem_global {
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; kobject kobj;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;workqueue_struct *swap_queue;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; work_struct work;
+	spinlock_t lock;
+	uint64_t lower_mem_limit;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;ttm_mem_zone *zones[TTM_MEM_MAX_ZONES];
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;unsigned int&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; num_zones;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;ttm_mem_zone *zone_kernel;
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;#ifdef&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; CONFIG_HIGHMEM
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;ttm_mem_zone *zone_highmem;
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;#else
+	struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;ttm_mem_zone *zone_dma32;
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;#endif
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;} ttm_mem_glob;
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;该全局对象由&lt;code&gt;ttm_mem_global_init&lt;&#x2F;code&gt;初始化，我们只看它初始化的page pool，也就是page缓存池。这个page缓冲区池由&lt;code&gt;ttm_pool_manager&lt;&#x2F;code&gt;描述，也是单例对象，由&lt;code&gt;ttm_page_alloc_init&lt;&#x2F;code&gt;函数初始化。&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;ttm_pool_manager {
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; kobject		kobj;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; shrinker		mm_shrink;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; ttm_pool_opts	options;
+
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;union &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;{
+		&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; ttm_page_pool	pools[NUM_POOLS];
+		&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;{
+			&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; ttm_page_pool	wc_pool;
+			&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; ttm_page_pool	uc_pool;
+			&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; ttm_page_pool	wc_pool_dma32;
+			&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; ttm_page_pool	uc_pool_dma32;
+			&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; ttm_page_pool	wc_pool_huge;
+			&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; ttm_page_pool	uc_pool_huge;
+		} ;
+	};
+};
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;这里注意一个逻辑，有cache的page是不需要缓存起来的，可以直接通过内存子系统提供的接口进行申请和回收。其于的情况下都会为其维护一个page池，由&lt;code&gt;struct ttm_page_pool&lt;&#x2F;code&gt;描述。&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;ttm_page_pool {
+	spinlock_t		lock;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;bool&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;			fill_lock;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; list_head	list;
+	gfp_t			gfp_flags;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;unsigned&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;		npages;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;char			&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;*name;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;unsigned long&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;		nfrees;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;unsigned long&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;		nrefills;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;unsigned int&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;		order;
+};
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;&lt;h2 id=&quot;ttm-tt&quot;&gt;ttm_tt&lt;&#x2F;h2&gt;
+&lt;p&gt;TTM的全称是&lt;code&gt;Translation Table Manager&lt;&#x2F;code&gt;，那么&lt;code&gt;ttm_tt&lt;&#x2F;code&gt;中的&lt;code&gt;tt&lt;&#x2F;code&gt;就应该是&lt;code&gt;Translation Table&lt;&#x2F;code&gt;的缩写。这个结构体在BO的操作中时有出现，很显然它用管理内存页表，应用于存在于非VRAM空间中的BO。从名字上来看&lt;code&gt;ttm_tt&lt;&#x2F;code&gt;是TTM的核心对象之一。&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;ttm_tt {
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;ttm_bo_device *bdev;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;ttm_backend_func *func;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;page **pages;
+	uint32_t page_flags;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;unsigned long&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; num_pages;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;sg_table *sg; &lt;&#x2F;span&gt;&lt;span style=&quot;color:#65737e;&quot;&gt;&#x2F;* for SG objects via dma-buf *&#x2F;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;struct &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;file *swap_storage;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;enum&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt; ttm_caching_state caching_state;
+	&lt;&#x2F;span&gt;&lt;span style=&quot;color:#b48ead;&quot;&gt;enum &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;{
+		tt_bound,
+		tt_unbound,
+		tt_unpopulated,
+	} state;
+};
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;&lt;code&gt;ttm_tt&lt;&#x2F;code&gt;实质上管理BO的存储后端，所以它是嵌入到&lt;code&gt;ttm_buffer_object&lt;&#x2F;code&gt;中的。事实上&lt;code&gt;ttm_buffer_object-&amp;gt;ttm&lt;&#x2F;code&gt;的创建是通过驱动程序注册的&lt;code&gt;ttm_bo_driver-&amp;gt;ttm_tt_create&lt;&#x2F;code&gt;回调函数实现的，下面是&lt;code&gt;ttm_ttm_create&lt;&#x2F;code&gt;函数的片段：&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#2b303b;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;	bo-&amp;gt;ttm = bdev-&amp;gt;driver-&amp;gt;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bf616a;&quot;&gt;ttm_tt_create&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c0c5ce;&quot;&gt;(bo, page_flags);
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;这个回调函数内部一般会调用&lt;code&gt;ttm_tt_init&lt;&#x2F;code&gt;初始化&lt;code&gt;ttm_tt&lt;&#x2F;code&gt;，本质上是初始化&lt;code&gt;ttm_tt&lt;&#x2F;code&gt;各字段并申请一个用于存放&lt;code&gt;struct page&lt;&#x2F;code&gt;的数组。&lt;&#x2F;p&gt;
+&lt;p&gt;&lt;code&gt;ttm_tt&lt;&#x2F;code&gt;的&lt;code&gt;state&lt;&#x2F;code&gt;中保存了当前的状态，即：&lt;&#x2F;p&gt;
+&lt;ul&gt;
+&lt;li&gt;unpopulated，内存没有分配&lt;&#x2F;li&gt;
+&lt;li&gt;unbound，内存已经分配，但是没有bind&lt;&#x2F;li&gt;
+&lt;li&gt;bind，内存已经分配，且已经bind&lt;&#x2F;li&gt;
+&lt;&#x2F;ul&gt;
+</content>
+	</entry>
+</feed>

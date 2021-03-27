@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+      <meta http-equiv="X-UA-Compatible" content="IE=edge">
+      <meta http-equiv="content-type" content="text/html; charset=utf-8">
+
+      <!-- Enable responsiveness on mobile devices-->
+      <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+
+      <title>crab2313&#x27;s blog - eventfd在内核中的实现</title>
+
+      
+        <link rel="alternate" type="application/atom+xml" title="RSS" href="https://crab2313.github.io/atom.xml">
+      
+
+      
+          <script src="https://cdnjs.cloudflare.com/ajax/libs/slideout/1.0.1/slideout.min.js"></script>
+          
+      
+
+      
+          <link rel="stylesheet" href="https:&#x2F;&#x2F;crab2313.github.io&#x2F;site.css">
+          
+      
+
+      
+      
+    </head>
+
+    <body>
+        <div class="container">
+
+            <div id="mobile-navbar" class="mobile-navbar">
+              <div class="mobile-header-logo">
+                <a href="/" class="logo">crab2313&#x27;s blog</a>
+              </div>
+              <div class="mobile-navbar-icon icon-out">
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
+            </div>
+
+            <nav id="mobile-menu" class="mobile-menu slideout-menu slideout-menu-left">
+              <ul class="mobile-menu-list">
+                
+                    <li class="mobile-menu-item">
+                        <a href="https:&#x2F;&#x2F;crab2313.github.io">
+                            Home
+                        </a>
+                    </li>
+                
+                    <li class="mobile-menu-item">
+                        <a href="https:&#x2F;&#x2F;crab2313.github.io&#x2F;tags">
+                            Tags
+                        </a>
+                    </li>
+                
+                    <li class="mobile-menu-item">
+                        <a href="https:&#x2F;&#x2F;github.com&#x2F;crab2313">
+                            Github
+                        </a>
+                    </li>
+                
+              </ul>
+            </nav>
+
+            <header id="header">
+                <div class="logo"><a href="https:&#x2F;&#x2F;crab2313.github.io">crab2313&#x27;s blog</a></div>
+                <nav class="menu">
+                    <ul>
+                        
+                            <li>
+                                <a href="https:&#x2F;&#x2F;crab2313.github.io">
+                                    Home
+                                </a>
+                            </li>
+                        
+                            <li>
+                                <a href="https:&#x2F;&#x2F;crab2313.github.io&#x2F;tags">
+                                    Tags
+                                </a>
+                            </li>
+                        
+                            <li>
+                                <a href="https:&#x2F;&#x2F;github.com&#x2F;crab2313">
+                                    Github
+                                </a>
+                            </li>
+                        
+                    </ul>
+                </nav>
+            </header>
+
+            <main>
+                <div class="content" id="mobile-panel">
+                    
+
+
+<div class="post-toc" id="post-toc">
+    <h2 class="post-toc-title">Contents</h2>
+    <div class="post-toc-content always-active">
+        <nav id="TableOfContents">
+            <ul>
+                
+                <li>
+                    <a href="https://crab2313.github.io/eventfd/#zai-nei-he-zhong-de-biao-shi" class="toc-link">在内核中的表示</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://crab2313.github.io/eventfd/#yong-hu-tai-jie-kou" class="toc-link">用户态接口</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://crab2313.github.io/eventfd/#eventfdde-hui-diao-han-shu" class="toc-link">eventfd的回调函数</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://crab2313.github.io/eventfd/#release" class="toc-link">release</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://crab2313.github.io/eventfd/#du-qu-cao-zuo" class="toc-link">读取操作</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://crab2313.github.io/eventfd/#xie-ru-cao-zuo" class="toc-link">写入操作</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://crab2313.github.io/eventfd/#pollcao-zuo" class="toc-link">POLL操作</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://crab2313.github.io/eventfd/#nei-he-tong-zhi-ji-zhi" class="toc-link">内核通知机制</a>
+                    
+                </li>
+                
+            </ul>
+        </nav>
+    </div>
+</div>
+
+
+<article class="post">
+    
+    <header class="post__header">
+        <h1 class="post__title">
+            <a href="https:&#x2F;&#x2F;crab2313.github.io&#x2F;eventfd&#x2F;">eventfd在内核中的实现</a>
+        </h1>
+        <div class="post__meta">
+            <span class="post__time">2017-12-19</span>
+            
+        </div>
+    </header>
+
+    <div class="post-content">
+      <p>eventfd是一个利用匿名文件描述符实现“等待/通知”通信机制的一种方式。它比较方便的一点是，eventfd不仅可以实现用户态与用户态之间的通信，也可以实现内核与用户态的通信。eventfd的实现比较简单易懂，主要在以下两个文件中：</p>
+<ul>
+<li>include/linux/eventfd.h</li>
+<li>fs/eventfd.c</li>
+</ul>
+<p>而关于eventfd的详细说明可以参考man-pages：</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#c0c5ce;">man eventfd
+</span></code></pre>
+<p>由于eventfd的实现很简短（只有500行左右），下面详细地分析在内核中的实现。</p>
+<h1 id="zai-nei-he-zhong-de-biao-shi">在内核中的表示</h1>
+<p>很明显，eventfd需要一个保存特定的状态，内核使用eventfd_ctx来保存一个eventfd的状态信息。</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#b48ead;">struct </span><span style="color:#c0c5ce;">eventfd_ctx {
+        </span><span style="color:#b48ead;">struct</span><span style="color:#c0c5ce;"> kref kref;
+        wait_queue_head_t wqh;
+        __u64 count;
+        </span><span style="color:#b48ead;">unsigned int</span><span style="color:#c0c5ce;"> flags;
+};
+</span></code></pre>
+<p>可以看到内核使用了一个kref来作为引用计数。使用一个64位的count字段来保存eventfd的内部计数器，使用flags字段保存eventfd的标志位。作为一个“等待/通知”机制，等待和唤醒操作是必不可少的，内核中实现这个操作的标准方式是用一个waitqueue，即wqh字段。</p>
+<h1 id="yong-hu-tai-jie-kou">用户态接口</h1>
+<p>从man-pages中可以了解到，内核中提供了两个系统调用：eventfd和eventfd2。当eventfd2存在时，glibc默认使用eventfd2系统调用。这两个系统调用的区别是，eventfd2允许传入flags参数，而eventfd系统调用强制设置flags为0。在<code>fs/eventfd.c</code>文件的末尾，我们可以找到这两个系统调用。</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#bf616a;">SYSCALL_DEFINE2</span><span style="color:#c0c5ce;">(eventfd2, </span><span style="color:#b48ead;">unsigned int</span><span style="color:#c0c5ce;">, count, </span><span style="color:#b48ead;">int</span><span style="color:#c0c5ce;">, flags)
+{        </span><span style="color:#b48ead;">int</span><span style="color:#c0c5ce;"> fd, error;        </span><span style="color:#b48ead;">struct</span><span style="color:#c0c5ce;"> file *file;
+        error = </span><span style="color:#bf616a;">get_unused_fd_flags</span><span style="color:#c0c5ce;">(flags &amp; EFD_SHARED_FCNTL_FLAGS);
+        </span><span style="color:#b48ead;">if </span><span style="color:#c0c5ce;">(error &lt; </span><span style="color:#d08770;">0</span><span style="color:#c0c5ce;">)                </span><span style="color:#b48ead;">return</span><span style="color:#c0c5ce;"> error;
+        fd = error;
+        file = </span><span style="color:#bf616a;">eventfd_file_create</span><span style="color:#c0c5ce;">(count, flags);
+        </span><span style="color:#b48ead;">if </span><span style="color:#c0c5ce;">(</span><span style="color:#bf616a;">IS_ERR</span><span style="color:#c0c5ce;">(file)) {
+                error = </span><span style="color:#bf616a;">PTR_ERR</span><span style="color:#c0c5ce;">(file);
+                </span><span style="color:#b48ead;">goto</span><span style="color:#c0c5ce;"> err_put_unused_fd;
+        }
+        </span><span style="color:#bf616a;">fd_install</span><span style="color:#c0c5ce;">(fd, file);
+
+        </span><span style="color:#b48ead;">return</span><span style="color:#c0c5ce;"> fd;
+
+err_put_unused_fd:
+        </span><span style="color:#bf616a;">put_unused_fd</span><span style="color:#c0c5ce;">(fd);
+
+        </span><span style="color:#b48ead;">return</span><span style="color:#c0c5ce;"> error;
+}
+
+</span><span style="color:#bf616a;">SYSCALL_DEFINE1</span><span style="color:#c0c5ce;">(eventfd, </span><span style="color:#b48ead;">unsigned int</span><span style="color:#c0c5ce;">, count)
+{
+        </span><span style="color:#b48ead;">return </span><span style="color:#bf616a;">sys_eventfd2</span><span style="color:#c0c5ce;">(count, </span><span style="color:#d08770;">0</span><span style="color:#c0c5ce;">);
+}
+</span></code></pre>
+<p>简单观察可以发现eventfd是eventfd2的简单包装（将flags设置为0），所以我们集中分析eventfd2做了什么。首先调用<code>get_unused_fd_flags</code>在当前进程中找来一个未使用的文件描述符并返回，同时设置其标志位。可以从eventfd.h文件中发现，<code>EFD_SHARED_FCNTL_FLAGS</code>实际上的定义如下：</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#b48ead;">#define </span><span style="color:#c0c5ce;">EFD_CLOEXEC			O_CLOEXEC
+</span><span style="color:#b48ead;">#define </span><span style="color:#c0c5ce;">EFD_NONBLOCK                    O_NONBLOCK
+</span><span style="color:#b48ead;">#define </span><span style="color:#c0c5ce;">EFD_SHARED_FCNTL_FLAGS		(O_NONBLOCK | O_CLOEXEC)
+</span></code></pre>
+<p>也就是说，eventfd的<code>EFD_NONBLOCK</code>和<code>EFD_CLOEXEC</code>与fcntl对应的<code>O_*</code>标志位是公用的。然后eventfd2系统调用又调用了<code>eventfd_file_create</code>创建了struct file结构体，最后使用fd_install函数将这个struct file结构体关联到当前的任务中。最后所有的问题都集中到了<code>eventfd_file_create</code>函数中，忽略掉一些sanity check，可以在<code>eventfd_file_create</code>函数中看到以下代码：</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#b48ead;">struct</span><span style="color:#c0c5ce;"> file *</span><span style="color:#8fa1b3;">eventfd_file_create</span><span style="color:#c0c5ce;">(</span><span style="color:#b48ead;">unsigned int </span><span style="color:#bf616a;">count</span><span style="color:#c0c5ce;">, </span><span style="color:#b48ead;">int </span><span style="color:#bf616a;">flags</span><span style="color:#c0c5ce;">)
+{
+        </span><span style="color:#b48ead;">struct</span><span style="color:#c0c5ce;"> file *file;
+        </span><span style="color:#b48ead;">struct</span><span style="color:#c0c5ce;"> eventfd_ctx *ctx;
+        ......
+        ctx = </span><span style="color:#bf616a;">kmalloc</span><span style="color:#c0c5ce;">(sizeof(*ctx), GFP_KERNEL);
+        ......
+        file = </span><span style="color:#bf616a;">anon_inode_getfile</span><span style="color:#c0c5ce;">(&quot;</span><span style="color:#a3be8c;">[eventfd]</span><span style="color:#c0c5ce;">&quot;, &amp;eventfd_fops, ctx,
+                                  O_RDWR | (flags &amp; EFD_SHARED_FCNTL_FLAGS));
+        ......
+        </span><span style="color:#b48ead;">return</span><span style="color:#c0c5ce;"> file;
+}
+</span></code></pre>
+<p>即使用了比较常见的<code>anon_inode_getfile</code>函数创建了一个匿名的inode，打开这个inode得到struct file结构体，对应的fops为eventfd_fops。接下来分析这VFT中注册的回调函数的行为。</p>
+<h1 id="eventfdde-hui-diao-han-shu">eventfd的回调函数</h1>
+<p>紧接上一节，我们得到了一个名为<code>eventfd_fops</code>的<code>file_operations</code>，如下：</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#b48ead;">static const struct</span><span style="color:#c0c5ce;"> file_operations eventfd_fops = {
+
+</span><span style="color:#b48ead;">#ifdef</span><span style="color:#c0c5ce;"> CONFIG_PROC_FS
+        .</span><span style="color:#bf616a;">show_fdinfo    </span><span style="color:#c0c5ce;">= eventfd_show_fdinfo,
+</span><span style="color:#b48ead;">#endif
+        </span><span style="color:#c0c5ce;">.</span><span style="color:#bf616a;">release        </span><span style="color:#c0c5ce;">= eventfd_release,
+        .</span><span style="color:#bf616a;">poll           </span><span style="color:#c0c5ce;">= eventfd_poll,
+        .</span><span style="color:#bf616a;">read           </span><span style="color:#c0c5ce;">= eventfd_read,
+        .</span><span style="color:#bf616a;">write          </span><span style="color:#c0c5ce;">= eventfd_write,
+        .</span><span style="color:#bf616a;">llseek         </span><span style="color:#c0c5ce;">= noop_llseek,
+};
+</span></code></pre>
+<p>.llseek是一个空的占位函数，可以不去理会。</p>
+<h1 id="release">release</h1>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#b48ead;">void </span><span style="color:#8fa1b3;">eventfd_ctx_put</span><span style="color:#c0c5ce;">(</span><span style="color:#b48ead;">struct</span><span style="color:#c0c5ce;"> eventfd_ctx *</span><span style="color:#bf616a;">ctx</span><span style="color:#c0c5ce;">)
+{
+        </span><span style="color:#bf616a;">kref_put</span><span style="color:#c0c5ce;">(&amp;ctx-&gt;kref, eventfd_free);
+}
+
+</span><span style="color:#b48ead;">static int </span><span style="color:#8fa1b3;">eventfd_release</span><span style="color:#c0c5ce;">(</span><span style="color:#b48ead;">struct</span><span style="color:#c0c5ce;"> inode *</span><span style="color:#bf616a;">inode</span><span style="color:#c0c5ce;">, </span><span style="color:#b48ead;">struct</span><span style="color:#c0c5ce;"> file *</span><span style="color:#bf616a;">file</span><span style="color:#c0c5ce;">)
+{
+        </span><span style="color:#b48ead;">struct</span><span style="color:#c0c5ce;"> eventfd_ctx *ctx = file-&gt;private_data;
+        </span><span style="color:#bf616a;">wake_up_poll</span><span style="color:#c0c5ce;">(&amp;ctx-&gt;wqh, POLLHUP);
+        </span><span style="color:#bf616a;">eventfd_ctx_put</span><span style="color:#c0c5ce;">(ctx);
+        </span><span style="color:#b48ead;">return </span><span style="color:#d08770;">0</span><span style="color:#c0c5ce;">;
+}
+</span></code></pre>
+<p>还是比较好懂的，首先使用POLLHUP作为key调用<code>wake_up_poll</code>唤醒waitqueue，然后将<code>eventfd_ctx</code>的引用计数减一。如果引用计数为0，那么就调用kfree直接释放掉<code>eventfd_ctx</code>占用的内存。</p>
+<h1 id="du-qu-cao-zuo">读取操作</h1>
+<p><code>eventfd_read</code>回调函数中并没有做太多事情，简单的检查了参数之后，就将所有工作委托给了<code>eventfd_ctx_read</code>函数。现在先描述一下这个函数的行为，然后解释它的实现细节。</p>
+<p>函数首先根据传进来的no_wait参数确定是否应该做阻塞操作，阻塞停止的判断标准是<code>ctx-&gt;count &gt; 0</code>，也就是如果eventfd内部的计数器为大于0的话，就会停止阻塞。随后函数调用<code>eventfd_ctx_do_read</code>更新eventfd计数器的值，并根据ctx-&gt;wqh是否正常工作以POLLOUT为参数调用<code>wake_up_locked_poll</code>函数通知还在ctx-&gt;wqh上做poll操作的任务。</p>
+<p><code>eventfd_ctx_do_read</code>的行为比较简单：如果ctx-&gt;flags中有EFD_SEMAPHORE标志，那么就将ctx-&gt;count减去1，否则就清零。</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#b48ead;">static void </span><span style="color:#8fa1b3;">eventfd_ctx_do_read</span><span style="color:#c0c5ce;">(</span><span style="color:#b48ead;">struct</span><span style="color:#c0c5ce;"> eventfd_ctx *</span><span style="color:#bf616a;">ctx</span><span style="color:#c0c5ce;">, __u64 *</span><span style="color:#bf616a;">cnt</span><span style="color:#c0c5ce;">)
+{
+        *cnt = (ctx-&gt;flags &amp; EFD_SEMAPHORE) ? </span><span style="color:#d08770;">1 </span><span style="color:#c0c5ce;">: ctx-&gt;count;
+        ctx-&gt;count -= *cnt;
+}
+</span></code></pre>
+<p>可以看到<code>eventfd_ctx</code>中没有自己的锁，所以它用的是wqh.lock这个spinlock，这个spinlock是与waitqueue共用的，所以<code>eventfd_ops.poll</code>操作的实现需要考虑很多data race出现的情况。为了实现等待操作，函数首先将自身任务放入ctx-&gt;wqh中，然后进入一个死循环，在循环开始将自身运行状态设置为<code>TASK_INTERRUPTIBLE</code>，这标志着任务进入等待状态，并可以接收信号。接下来检查ctx-&gt;count是否大于0，如果是则宣告等待结束。最后检测当前任务是否有到来的信号，如果有，那么此次等待操作失败，返回-ERESTARTSYS，文件系统层会重新进行此次操作。注意我们是不能拿着spinlock做上下文切换的，所以调用schedule前应该要把spinlock放回去，在schedule返回的时候再重新持有spinlock。死循环结束时，将当前任务从ctx-&gt;wqh中移除，并重置当前运行状态为TASK_RUNNING。</p>
+<h1 id="xie-ru-cao-zuo">写入操作</h1>
+<p><code>eventfd_write</code>的实现和<code>eventfd_read</code>非常相似，没有什么需要过多解释的细节。<code>ctx-&gt;count</code>可以保存的最大值是0xfffffffffffffffe即<code>UULONG_MAX-1</code>，每次<code>eventfd_write</code>操作会增加<code>ctx-&gt;count</code>的值，如果ctx-&gt;count的值增加之后会超过<code>UULONG_MAX-1</code>那么<code>eventfd_write</code>会根据<code>O_NONBLOCK</code>是否设置决定是阻塞等待还是直接返回<code>-EAGAIN</code>。</p>
+<h1 id="pollcao-zuo">POLL操作</h1>
+<p><code>eventfd_poll</code>函数看起来是最短最简单的一个，其实是最复杂的一个。前面提到，<code>eventfd_ctx</code>直接将<code>ctx-&gt;wqh.lock</code>当作自己的锁，这与poll操作是冲突的，因为<code>poll_wait函数</code>会先获取<code>ctx-&gt;wqh.lock</code>。为了保证函数功能正确，必须考虑所有情况。</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#b48ead;">static unsigned int </span><span style="color:#8fa1b3;">eventfd_poll</span><span style="color:#c0c5ce;">(</span><span style="color:#b48ead;">struct</span><span style="color:#c0c5ce;"> file *</span><span style="color:#bf616a;">file</span><span style="color:#c0c5ce;">, poll_table *</span><span style="color:#bf616a;">wait</span><span style="color:#c0c5ce;">)
+{
+        </span><span style="color:#b48ead;">struct</span><span style="color:#c0c5ce;"> eventfd_ctx *ctx = file-&gt;private_data;
+        </span><span style="color:#b48ead;">unsigned int</span><span style="color:#c0c5ce;"> events = </span><span style="color:#d08770;">0</span><span style="color:#c0c5ce;">;
+        u64 count;
+
+        </span><span style="color:#bf616a;">poll_wait</span><span style="color:#c0c5ce;">(file, &amp;ctx-&gt;wqh, wait);
+        count = </span><span style="color:#bf616a;">READ_ONCE</span><span style="color:#c0c5ce;">(ctx-&gt;count);
+
+        </span><span style="color:#b48ead;">if </span><span style="color:#c0c5ce;">(count &gt; </span><span style="color:#d08770;">0</span><span style="color:#c0c5ce;">)
+                events |= POLLIN;
+        </span><span style="color:#b48ead;">if </span><span style="color:#c0c5ce;">(count == ULLONG_MAX)
+                events |= POLLERR;
+        </span><span style="color:#b48ead;">if </span><span style="color:#c0c5ce;">(ULLONG_MAX - </span><span style="color:#d08770;">1 </span><span style="color:#c0c5ce;">&gt; count)
+                events |= POLLOUT;
+
+        </span><span style="color:#b48ead;">return</span><span style="color:#c0c5ce;"> events;
+}
+</span></code></pre>
+<p>首先可以确定的是，<code>eventfd_poll</code>不能像read和write那样在开头获取<code>ctx-&gt;wqh.lock</code>。原因前面提到了，<code>poll_wait</code>里面调用了<code>add_wait_queue</code>，也会去拿这个spinlock。在已经持有锁的情况下再去获取这个锁，就会造成死锁。从代码中可以看到，从<code>poll_wait</code>以下的代码是没有锁保护的，这就需要确定所有情况保证代码不出现竞争。</p>
+<p><code>READ_ONCE</code>是一个特殊的宏，可以保证对<code>ctx-&gt;count</code>的读取有且只有一次。由于指令重排的作用，这一行：</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#c0c5ce;">        count = </span><span style="color:#bf616a;">READ_ONCE</span><span style="color:#c0c5ce;">(ctx-&gt;count);
+</span></code></pre>
+<p>可能会向上移动到<code>poll_wait</code>中的<code>add_wait_queue</code>的临界区里，但是不会移动到临界区之上。这是因为spinlock在ACCQUIRE操作时的语义隐含：所有在持有操作之后的内存操作都会在持有操作之后完成。翻译成白话就是在获取spinlock之后做的内存操作都不会重排到获取spinlock操作之前。可能出现的竞争为：</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#c0c5ce;">         *     poll                               write
+         *     -----------------                  ------------
+         *     lock ctx-&gt;wqh.</span><span style="color:#bf616a;">lock </span><span style="color:#c0c5ce;">(in poll_wait)
+         *     count = ctx-&gt;count
+         *     __add_wait_queue
+         *     unlock ctx-&gt;wqh.</span><span style="color:#bf616a;">lock
+         </span><span style="color:#c0c5ce;">*                                        lock ctx-&gt;qwh.</span><span style="color:#bf616a;">lock
+         </span><span style="color:#c0c5ce;">*                                        ctx-&gt;count += n
+         *                                        </span><span style="color:#b48ead;">if </span><span style="color:#c0c5ce;">(waitqueue_active)
+         *                                          wake_up_locked_poll
+         *                                        unlock ctx-&gt;qwh.</span><span style="color:#bf616a;">lock
+         </span><span style="color:#c0c5ce;">*     eventfd_poll returns </span><span style="color:#d08770;">0
+</span></code></pre>
+<p>这个是安全的，因为write的<code>wake_up_locked_poll</code>函数还会把在poll的任务唤醒一次。</p>
+<h1 id="nei-he-tong-zhi-ji-zhi">内核通知机制</h1>
+<p>内核可以使用<code>eventfd_signal</code>函数从内核一侧实现write操作，可以使用<code>eventfd_etx_remove_wait_queue</code>实现内核端的read操作，代码比较简单：</p>
+<pre style="background-color:#2b303b;">
+<code><span style="color:#c0c5ce;">__u64 </span><span style="color:#8fa1b3;">eventfd_signal</span><span style="color:#c0c5ce;">(</span><span style="color:#b48ead;">struct</span><span style="color:#c0c5ce;"> eventfd_ctx *</span><span style="color:#bf616a;">ctx</span><span style="color:#c0c5ce;">, __u64 </span><span style="color:#bf616a;">n</span><span style="color:#c0c5ce;">)
+{
+        </span><span style="color:#b48ead;">unsigned long</span><span style="color:#c0c5ce;"> flags;
+
+        </span><span style="color:#bf616a;">spin_lock_irqsave</span><span style="color:#c0c5ce;">(&amp;ctx-&gt;wqh.</span><span style="color:#bf616a;">lock</span><span style="color:#c0c5ce;">, flags);
+        </span><span style="color:#b48ead;">if </span><span style="color:#c0c5ce;">(ULLONG_MAX - ctx-&gt;count &lt; n)
+                n = ULLONG_MAX - ctx-&gt;count;
+        ctx-&gt;count += n;
+        </span><span style="color:#b48ead;">if </span><span style="color:#c0c5ce;">(</span><span style="color:#bf616a;">waitqueue_active</span><span style="color:#c0c5ce;">(&amp;ctx-&gt;wqh))
+                </span><span style="color:#bf616a;">wake_up_locked_poll</span><span style="color:#c0c5ce;">(&amp;ctx-&gt;wqh, POLLIN);
+        </span><span style="color:#bf616a;">spin_unlock_irqrestore</span><span style="color:#c0c5ce;">(&amp;ctx-&gt;wqh.</span><span style="color:#bf616a;">lock</span><span style="color:#c0c5ce;">, flags);
+
+        </span><span style="color:#b48ead;">return</span><span style="color:#c0c5ce;"> n;
+}
+</span><span style="color:#b48ead;">int </span><span style="color:#8fa1b3;">eventfd_ctx_remove_wait_queue</span><span style="color:#c0c5ce;">(</span><span style="color:#b48ead;">struct</span><span style="color:#c0c5ce;"> eventfd_ctx *</span><span style="color:#bf616a;">ctx</span><span style="color:#c0c5ce;">, wait_queue_t *</span><span style="color:#bf616a;">wait</span><span style="color:#c0c5ce;">,
+                                  __u64 *</span><span style="color:#bf616a;">cnt</span><span style="color:#c0c5ce;">)
+{
+        </span><span style="color:#b48ead;">unsigned long</span><span style="color:#c0c5ce;"> flags;
+
+        </span><span style="color:#bf616a;">spin_lock_irqsave</span><span style="color:#c0c5ce;">(&amp;ctx-&gt;wqh.</span><span style="color:#bf616a;">lock</span><span style="color:#c0c5ce;">, flags);
+        </span><span style="color:#bf616a;">eventfd_ctx_do_read</span><span style="color:#c0c5ce;">(ctx, cnt);
+        </span><span style="color:#bf616a;">__remove_wait_queue</span><span style="color:#c0c5ce;">(&amp;ctx-&gt;wqh, wait);
+        </span><span style="color:#b48ead;">if </span><span style="color:#c0c5ce;">(*cnt != </span><span style="color:#d08770;">0 </span><span style="color:#c0c5ce;">&amp;&amp; </span><span style="color:#bf616a;">waitqueue_active</span><span style="color:#c0c5ce;">(&amp;ctx-&gt;wqh))
+                </span><span style="color:#bf616a;">wake_up_locked_poll</span><span style="color:#c0c5ce;">(&amp;ctx-&gt;wqh, POLLOUT);
+        </span><span style="color:#bf616a;">spin_unlock_irqrestore</span><span style="color:#c0c5ce;">(&amp;ctx-&gt;wqh.</span><span style="color:#bf616a;">lock</span><span style="color:#c0c5ce;">, flags);
+
+        </span><span style="color:#b48ead;">return </span><span style="color:#c0c5ce;">*cnt != </span><span style="color:#d08770;">0 </span><span style="color:#c0c5ce;">? </span><span style="color:#d08770;">0 </span><span style="color:#c0c5ce;">: -EAGAIN;
+}
+</span></code></pre>
+    </div>
+
+    
+    
+
+    <div class="post-footer">
+        
+            
+                <div class="post-tags">
+                    
+                        <a href="https:&#x2F;&#x2F;crab2313.github.io&#x2F;tags&#x2F;kernel&#x2F;">#kernel</a>
+                    
+                        <a href="https:&#x2F;&#x2F;crab2313.github.io&#x2F;tags&#x2F;eventfd&#x2F;">#eventfd</a>
+                    
+                </div>
+            
+            
+                <div class="post-nav">
+                    
+                        <a class="previous" href="https:&#x2F;&#x2F;crab2313.github.io&#x2F;floyd-cycle-detection&#x2F;">‹ Floyd循环检测算法</a>
+                    
+                    
+                        <a class="next" href="https:&#x2F;&#x2F;crab2313.github.io&#x2F;inode-permission&#x2F;">inode权限检查 ›</a>
+                    
+                    
+                    
+                </div>
+            
+
+        
+
+    </div>
+
+    
+    
+</article>
+
+
+                </div>
+            </main>
+
+            
+            
+        </div>
+
+      
+          <script type="text/javascript" src="https:&#x2F;&#x2F;crab2313.github.io&#x2F;even.js" ></script>
+      
+    </body>
+
+</html>
