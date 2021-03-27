@@ -51,7 +51,7 @@
 </code></pre></td></tr></table></div></div><p>该函数的主要作用为更新引用计数，并创建两个符号链接：driver文件夹下的module，<code>&lt;module>/drivers/</code>文件夹下的driver。</p><h2 id=driver_register>driver_register</h2><p>这个函数其实没有做什么事情，大部分工作都由bus承担了。函数首先调用driver_find查找bus上是否已经有了同名驱动，如果有则报错退出。接下来调用bus_add_driver将其注册到bus中去。如果device_driver->groups不为NULL，则将其添加到自身的属性中。最后触发一个ADD类型的uevent事件。</p></div><div class=post-copyright><p class=copyright-item><span class=item-title>文章作者</span>
 <span class=item-content>crab2313</span></p><p class=copyright-item><span class=item-title>上次更新</span>
 <span class=item-content>2021-03-27
-<a href=https://github.com/crab2313/blog-doc/commit/ab1bf285c9cdeff0e40238932b2d5db70f65c31f title="migrate the blog to hugo">(ab1bf28)</a></span></p></div><footer class=post-footer><div class=post-tags><a href=/tags/kernel/>kernel</a>
+<a href=https://github.com/crab2313/blog-doc/commit/ee1692ebbd365d0e282371d7b47f57c03587bf27 title="migrate the blog to hugo">(ee1692e)</a></span></p></div><footer class=post-footer><div class=post-tags><a href=/tags/kernel/>kernel</a>
 <a href=/tags/driver/>driver</a></div><nav class=post-nav><a class=prev href=/post/kdump/><i class="iconfont icon-left"></i>
 <span class="prev-text nav-default">kdump工作机制分析</span>
 <span class="prev-text nav-mobile">上一篇</span></a>
