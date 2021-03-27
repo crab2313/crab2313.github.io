@@ -1,2 +1,2 @@
 User-agent: *
-Sitemap: crab2313.github.io/sitemap.xml
+Sitemap: /sitemap.xml
