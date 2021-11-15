@@ -1,4 +1,160 @@
-<!doctype html><html lang=zh-cn><head><meta charset=utf-8><meta http-equiv=x-ua-compatible content="IE=edge,chrome=1"><title>Linux在RISC-V平台下的模块实现 - crab2313's blog</title><meta name=renderer content="webkit"><meta name=viewport content="width=device-width,initial-scale=1,maximum-scale=1"><meta http-equiv=cache-control content="no-transform"><meta http-equiv=cache-control content="no-siteapp"><meta name=theme-color content="#f8f5ec"><meta name=msapplication-navbutton-color content="#f8f5ec"><meta name=apple-mobile-web-app-capable content="yes"><meta name=apple-mobile-web-app-status-bar-style content="#f8f5ec"><meta name=author content="crab2313"><meta name=description content="因为上次碰到了模块ABI改变导致的模块加载异常问题，虽然通过分析发现了问题，也认为解决方法是模块跟着ABI走，重新编译，但是认为模块的实现还"><meta name=keywords content="blog,kernel"><meta name=generator content="Hugo 0.84.1 with theme even"><link rel=canonical href=/post/kernel-module/><link rel=apple-touch-icon sizes=180x180 href=/apple-touch-icon.png><link rel=icon type=image/png sizes=32x32 href=/favicon-32x32.png><link rel=icon type=image/png sizes=16x16 href=/favicon-16x16.png><link rel=manifest href=/manifest.json><link rel=mask-icon href=/safari-pinned-tab.svg color=#5bbad5><link href=/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css rel=stylesheet><link rel=stylesheet href=https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin=anonymous><meta property="og:title" content="Linux在RISC-V平台下的模块实现"><meta property="og:description" content="因为上次碰到了模块ABI改变导致的模块加载异常问题，虽然通过分析发现了问题，也认为解决方法是模块跟着ABI走，重新编译，但是认为模块的实现还"><meta property="og:type" content="article"><meta property="og:url" content="/post/kernel-module/"><meta property="article:section" content="post"><meta property="article:published_time" content="2021-06-28T00:00:00+00:00"><meta property="article:modified_time" content="2021-06-28T16:49:56+08:00"><meta itemprop=name content="Linux在RISC-V平台下的模块实现"><meta itemprop=description content="因为上次碰到了模块ABI改变导致的模块加载异常问题，虽然通过分析发现了问题，也认为解决方法是模块跟着ABI走，重新编译，但是认为模块的实现还"><meta itemprop=datePublished content="2021-06-28T00:00:00+00:00"><meta itemprop=dateModified content="2021-06-28T16:49:56+08:00"><meta itemprop=wordCount content="7376"><meta itemprop=keywords content="kernel,binary,"><meta name=twitter:card content="summary"><meta name=twitter:title content="Linux在RISC-V平台下的模块实现"><meta name=twitter:description content="因为上次碰到了模块ABI改变导致的模块加载异常问题，虽然通过分析发现了问题，也认为解决方法是模块跟着ABI走，重新编译，但是认为模块的实现还"><!--[if lte IE 9]><script src=https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js></script><![endif]--><!--[if lt IE 9]><script src=https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js></script><script src=https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js></script><![endif]--></head><body><div id=mobile-navbar class=mobile-navbar><div class=mobile-header-logo><a href=/ class=logo>crab2313's blog</a></div><div class=mobile-navbar-icon><span></span><span></span><span></span></div></div><nav id=mobile-menu class="mobile-menu slideout-menu"><ul class=mobile-menu-list><a href=/><li class=mobile-menu-item>Home</li></a><a href=/post/><li class=mobile-menu-item>Archives</li></a><a href=/tags/><li class=mobile-menu-item>Tags</li></a><a href=/categories/><li class=mobile-menu-item>Categories</li></a></ul></nav><div class=container id=mobile-panel><header id=header class=header><div class=logo-wrapper><a href=/ class=logo>crab2313's blog</a></div><nav class=site-navbar><ul id=menu class=menu><li class=menu-item><a class=menu-item-link href=/>Home</a></li><li class=menu-item><a class=menu-item-link href=/post/>Archives</a></li><li class=menu-item><a class=menu-item-link href=/tags/>Tags</a></li><li class=menu-item><a class=menu-item-link href=/categories/>Categories</a></li></ul></nav></header><main id=main class=main><div class=content-wrapper><div id=content class=content><article class=post><header class=post-header><h1 class=post-title>Linux在RISC-V平台下的模块实现</h1><div class=post-meta><span class=post-time>2021-06-28</span></div></header><div class=post-toc id=post-toc><h2 class=post-toc-title>文章目录</h2><div class=post-toc-content><nav id=TableOfContents><ul><li><a href=#内核模块的生成机制>内核模块的生成机制</a></li><li><a href=#内核模块的装载流程>内核模块的装载流程</a><ul><li><a href=#合法性检查>合法性检查</a></li><li><a href=#setup_load_info>setup_load_info</a></li><li><a href=#rewrite_section_headers>rewrite_section_headers</a></li><li><a href=#check_modstruct_versions>check_modstruct_versions</a></li><li><a href=#layout_and_allocate>layout_and_allocate</a><ul><li><a href=#layout_sections>layout_sections</a></li><li><a href=#layout_symtab>layout_symtab</a></li><li><a href=#move_module>move_module</a></li></ul></li><li><a href=#percpu_modalloc>percpu_modalloc</a></li><li><a href=#find_module_sections>find_module_sections</a></li><li><a href=#simplify_symbols>simplify_symbols</a></li><li><a href=#apply_relocations>apply_relocations</a></li><li><a href=#do_module_init>do_module_init</a></li></ul></li><li><a href=#内核符号管理机制>内核符号管理机制</a><ul><li><a href=#符号的注册>符号的注册</a></li><li><a href=#符号的查找>符号的查找</a></li></ul></li></ul></nav></div></div><div class=post-content><p>因为上次碰到了模块ABI改变导致的模块加载异常问题，虽然通过分析发现了问题，也认为解决方法是模块跟着ABI走，重新编译，但是认为模块的实现还是要看的。虽然能够想清楚大概的实现方式，但是细节还是要深究一下。很明显内核模块涉及到内核的方方面面，我认为应该从以下几点进行分析：</p><ul><li>内核模块的资源管理，地址空间以及内存</li><li>内核模块的编译框架</li><li>内核模块的relocation机制</li><li>内核模块的格式细节，即内核模块这个ELF本身，以RISC-V为例</li><li>内核模块与架构相关代码如何交互，以RISC-V为例</li><li>内核模块相关的接口，以及内核如何管理内核模块</li><li>内核模块的签名机制</li><li>内核模块符号导出机制</li></ul><p>这次分析是对我综合能力的一次考验，但是感觉花够时间应该能够完成。下面列出个人认为内核模块主要涉及的知识点：</p><ul><li>ELF文件格式，编译链接原理，relocation原理。</li><li>内核地址空间管理，链接脚本</li><li>Kbuild源码分析能力</li><li>特定平台下的Code Model和寻址方式</li></ul><h1 id=内核模块的生成机制>内核模块的生成机制</h1><p>内核模块本身实际上是一个<code>relocatable</code>的ELF文件，其实就是常说的<code>.o</code>文件。这一类文件的特点是<code>relocatable</code>，也就是其中有用于<code>relocation</code>的section和符号表。一般情况下，链接器根据<code>.o</code>文件中的<code>relocation</code>段中的<code>relocation</code>和符号表中的内容决定如何填充代码段中的占位，然后生成一个可执行程序。而对于内核模块，内核会自行根据<code>relocatable</code>模块的<code>relocation</code>段和符号表的内容，自行进行<code>relocate</code>操作，本质上就是自行实现了runtime链接。原先在分析kdump工作原理时见到了类似的实现。</p><p>事实上，内核模块的生成原理并不复杂，仅仅简单是生成一个<code>relocatable</code>的ELF格式文件，这个文件由两部分组成：</p><ul><li>模块源码本身生成的<code>.o</code>文件</li><li>modpost生成的<code>&lt;module>.mod.c</code>文件编译后的<code>.o</code>文件</li></ul><p>在内核头文件中，与模块相关的定义一般有两套，一套用于生成vmlinux，另一套用于模块。这二者之间通过<code>MODULE</code>宏是否有定义进行区分。简单来说，内核用到个各个section在模块中也是适用的，模块的生成是比较简单的，真正复杂的处理在模块装载时体现。在内核的<code>scripts/mod</code>文件夹下，存放着<code>modpost</code>工具的源码，用于编译出<code>modpost</code>工具。modpost工具生成的<code>&lt;module_name>.mod.c</code>类似如下：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
+<!doctype html><html lang=zh-cn>
+<head>
+<meta charset=utf-8>
+<meta http-equiv=x-ua-compatible content="IE=edge,chrome=1">
+<title>Linux在RISC-V平台下的模块实现 - crab2313's blog</title>
+<meta name=renderer content="webkit">
+<meta name=viewport content="width=device-width,initial-scale=1,maximum-scale=1">
+<meta http-equiv=cache-control content="no-transform">
+<meta http-equiv=cache-control content="no-siteapp">
+<meta name=theme-color content="#f8f5ec">
+<meta name=msapplication-navbutton-color content="#f8f5ec">
+<meta name=apple-mobile-web-app-capable content="yes">
+<meta name=apple-mobile-web-app-status-bar-style content="#f8f5ec">
+<meta name=author content="crab2313"><meta name=description content="因为上次碰到了模块ABI改变导致的模块加载异常问题，虽然通过分析发现了问题，也认为解决方法是模块跟着ABI走，重新编译，但是认为模块的实现还"><meta name=keywords content="blog,kernel">
+<meta name=generator content="Hugo 0.89.2 with theme even">
+<link rel=canonical href=/post/kernel-module/>
+<link rel=apple-touch-icon sizes=180x180 href=/apple-touch-icon.png>
+<link rel=icon type=image/png sizes=32x32 href=/favicon-32x32.png>
+<link rel=icon type=image/png sizes=16x16 href=/favicon-16x16.png>
+<link rel=manifest href=/manifest.json>
+<link rel=mask-icon href=/safari-pinned-tab.svg color=#5bbad5>
+<link href=/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css rel=stylesheet>
+<link rel=stylesheet href=https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin=anonymous>
+<meta property="og:title" content="Linux在RISC-V平台下的模块实现">
+<meta property="og:description" content="因为上次碰到了模块ABI改变导致的模块加载异常问题，虽然通过分析发现了问题，也认为解决方法是模块跟着ABI走，重新编译，但是认为模块的实现还">
+<meta property="og:type" content="article">
+<meta property="og:url" content="/post/kernel-module/"><meta property="article:section" content="post">
+<meta property="article:published_time" content="2021-06-28T00:00:00+00:00">
+<meta property="article:modified_time" content="2021-06-28T16:49:56+08:00">
+<meta itemprop=name content="Linux在RISC-V平台下的模块实现">
+<meta itemprop=description content="因为上次碰到了模块ABI改变导致的模块加载异常问题，虽然通过分析发现了问题，也认为解决方法是模块跟着ABI走，重新编译，但是认为模块的实现还"><meta itemprop=datePublished content="2021-06-28T00:00:00+00:00">
+<meta itemprop=dateModified content="2021-06-28T16:49:56+08:00">
+<meta itemprop=wordCount content="7376">
+<meta itemprop=keywords content="kernel,binary,"><meta name=twitter:card content="summary">
+<meta name=twitter:title content="Linux在RISC-V平台下的模块实现">
+<meta name=twitter:description content="因为上次碰到了模块ABI改变导致的模块加载异常问题，虽然通过分析发现了问题，也认为解决方法是模块跟着ABI走，重新编译，但是认为模块的实现还"><!--[if lte IE 9]><script src=https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js></script><![endif]--><!--[if lt IE 9]><script src=https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js></script>
+<script src=https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js></script><![endif]-->
+</head>
+<body>
+<div id=mobile-navbar class=mobile-navbar>
+<div class=mobile-header-logo>
+<a href=/ class=logo>crab2313's blog</a>
+</div>
+<div class=mobile-navbar-icon>
+<span></span>
+<span></span>
+<span></span>
+</div>
+</div>
+<nav id=mobile-menu class="mobile-menu slideout-menu">
+<ul class=mobile-menu-list>
+<a href=/>
+<li class=mobile-menu-item>Home</li>
+</a><a href=/post/>
+<li class=mobile-menu-item>Archives</li>
+</a><a href=/tags/>
+<li class=mobile-menu-item>Tags</li>
+</a><a href=/categories/>
+<li class=mobile-menu-item>Categories</li>
+</a>
+</ul>
+</nav>
+<div class=container id=mobile-panel>
+<header id=header class=header>
+<div class=logo-wrapper>
+<a href=/ class=logo>crab2313's blog</a>
+</div>
+<nav class=site-navbar>
+<ul id=menu class=menu>
+<li class=menu-item>
+<a class=menu-item-link href=/>Home</a>
+</li><li class=menu-item>
+<a class=menu-item-link href=/post/>Archives</a>
+</li><li class=menu-item>
+<a class=menu-item-link href=/tags/>Tags</a>
+</li><li class=menu-item>
+<a class=menu-item-link href=/categories/>Categories</a>
+</li>
+</ul>
+</nav>
+</header>
+<main id=main class=main>
+<div class=content-wrapper>
+<div id=content class=content>
+<article class=post>
+<header class=post-header>
+<h1 class=post-title>Linux在RISC-V平台下的模块实现</h1>
+<div class=post-meta>
+<span class=post-time> 2021-06-28 </span>
+</div>
+</header>
+<div class=post-toc id=post-toc>
+<h2 class=post-toc-title>文章目录</h2>
+<div class=post-toc-content>
+<nav id=TableOfContents>
+<ul>
+<li><a href=#内核模块的生成机制>内核模块的生成机制</a></li>
+<li><a href=#内核模块的装载流程>内核模块的装载流程</a>
+<ul>
+<li><a href=#合法性检查>合法性检查</a></li>
+<li><a href=#setup_load_info>setup_load_info</a></li>
+<li><a href=#rewrite_section_headers>rewrite_section_headers</a></li>
+<li><a href=#check_modstruct_versions>check_modstruct_versions</a></li>
+<li><a href=#layout_and_allocate>layout_and_allocate</a>
+<ul>
+<li><a href=#layout_sections>layout_sections</a></li>
+<li><a href=#layout_symtab>layout_symtab</a></li>
+<li><a href=#move_module>move_module</a></li>
+</ul>
+</li>
+<li><a href=#percpu_modalloc>percpu_modalloc</a></li>
+<li><a href=#find_module_sections>find_module_sections</a></li>
+<li><a href=#simplify_symbols>simplify_symbols</a></li>
+<li><a href=#apply_relocations>apply_relocations</a></li>
+<li><a href=#do_module_init>do_module_init</a></li>
+</ul>
+</li>
+<li><a href=#内核符号管理机制>内核符号管理机制</a>
+<ul>
+<li><a href=#符号的注册>符号的注册</a></li>
+<li><a href=#符号的查找>符号的查找</a></li>
+</ul>
+</li>
+</ul>
+</nav>
+</div>
+</div>
+<div class=post-content>
+<p>因为上次碰到了模块ABI改变导致的模块加载异常问题，虽然通过分析发现了问题，也认为解决方法是模块跟着ABI走，重新编译，但是认为模块的实现还是要看的。虽然能够想清楚大概的实现方式，但是细节还是要深究一下。很明显内核模块涉及到内核的方方面面，我认为应该从以下几点进行分析：</p>
+<ul>
+<li>内核模块的资源管理，地址空间以及内存</li>
+<li>内核模块的编译框架</li>
+<li>内核模块的relocation机制</li>
+<li>内核模块的格式细节，即内核模块这个ELF本身，以RISC-V为例</li>
+<li>内核模块与架构相关代码如何交互，以RISC-V为例</li>
+<li>内核模块相关的接口，以及内核如何管理内核模块</li>
+<li>内核模块的签名机制</li>
+<li>内核模块符号导出机制</li>
+</ul>
+<p>这次分析是对我综合能力的一次考验，但是感觉花够时间应该能够完成。下面列出个人认为内核模块主要涉及的知识点：</p>
+<ul>
+<li>ELF文件格式，编译链接原理，relocation原理。</li>
+<li>内核地址空间管理，链接脚本</li>
+<li>Kbuild源码分析能力</li>
+<li>特定平台下的Code Model和寻址方式</li>
+</ul>
+<h1 id=内核模块的生成机制>内核模块的生成机制</h1>
+<p>内核模块本身实际上是一个<code>relocatable</code>的ELF文件，其实就是常说的<code>.o</code>文件。这一类文件的特点是<code>relocatable</code>，也就是其中有用于<code>relocation</code>的section和符号表。一般情况下，链接器根据<code>.o</code>文件中的<code>relocation</code>段中的<code>relocation</code>和符号表中的内容决定如何填充代码段中的占位，然后生成一个可执行程序。而对于内核模块，内核会自行根据<code>relocatable</code>模块的<code>relocation</code>段和符号表的内容，自行进行<code>relocate</code>操作，本质上就是自行实现了runtime链接。原先在分析kdump工作原理时见到了类似的实现。</p>
+<p>事实上，内核模块的生成原理并不复杂，仅仅简单是生成一个<code>relocatable</code>的ELF格式文件，这个文件由两部分组成：</p>
+<ul>
+<li>模块源码本身生成的<code>.o</code>文件</li>
+<li>modpost生成的<code>&lt;module>.mod.c</code>文件编译后的<code>.o</code>文件</li>
+</ul>
+<p>在内核头文件中，与模块相关的定义一般有两套，一套用于生成vmlinux，另一套用于模块。这二者之间通过<code>MODULE</code>宏是否有定义进行区分。简单来说，内核用到个各个section在模块中也是适用的，模块的生成是比较简单的，真正复杂的处理在模块装载时体现。在内核的<code>scripts/mod</code>文件夹下，存放着<code>modpost</code>工具的源码，用于编译出<code>modpost</code>工具。modpost工具生成的<code>&lt;module_name>.mod.c</code>类似如下：</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt> 1
 </span><span class=lnt> 2
 </span><span class=lnt> 3
 </span><span class=lnt> 4
@@ -28,7 +184,9 @@
 </span><span class=lnt>28
 </span><span class=lnt>29
 </span><span class=lnt>30
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c><span class=cp>#include</span> <span class=cpf>&lt;linux/module.h&gt;</span><span class=cp>
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=cp>#include</span> <span class=cpf>&lt;linux/module.h&gt;</span><span class=cp>
 </span><span class=cp>#define INCLUDE_VERMAGIC
 </span><span class=cp>#include</span> <span class=cpf>&lt;linux/build-salt.h&gt;</span><span class=cp>
 </span><span class=cp>#include</span> <span class=cpf>&lt;linux/vermagic.h&gt;</span><span class=cp>
@@ -58,7 +216,25 @@
 <span class=n>MODULE_ALIAS</span><span class=p>(</span><span class=s>&#34;wmi:8C5DA44C-CDC3-46B3-8619-4E26D34390B7&#34;</span><span class=p>);</span>
 
 <span class=n>MODULE_INFO</span><span class=p>(</span><span class=n>srcversion</span><span class=p>,</span> <span class=s>&#34;E60E97D36266BD3884F3208&#34;</span><span class=p>);</span>
-</code></pre></td></tr></table></div></div><p>这其中的一些机制细节，可以在模块装载流程分析时明了。除此之外，内核模块还可能携带签名，内核模块签名并不携带在ELF文件本身里面，而是计算完签名之后，添加到ELF文件尾部。</p><h1 id=内核模块的装载流程>内核模块的装载流程</h1><p>涉及内核模块的系统调用有三个：</p><ul><li>init_module</li><li>finit_module</li><li>delete_module</li></ul><p>其中，<code>finit_module</code>是<code>init_module</code>的文件描述符形式，可以勉强算作一个。因此，想要理解内核如何装载模块，完成了哪些工作，需要分析<code>init_module</code>函数。之所以称勉强算作一个，是因为<code>finit_module</code>有一个额外的参数，支持传入flags，即：</p><ul><li>MODULE_INIT_IGNORE_MODVERSIONS</li><li>MODULE_INIT_IGNORE_VERMAGIC</li></ul><p>而<code>init_module</code>则不允许。二者的本质都是在做完权限检查（CAP_SYS_MODULE和<code>modules_disabled</code>内核命令行）之后，分配空间存放内核模块ELF文件，然后调用<code>load_module</code>函数。<code>load_modules</code>的参数有三个，其中最关键的是<code>load_info</code>结构体。</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
+</code></pre></td></tr></table>
+</div>
+</div><p>这其中的一些机制细节，可以在模块装载流程分析时明了。除此之外，内核模块还可能携带签名，内核模块签名并不携带在ELF文件本身里面，而是计算完签名之后，添加到ELF文件尾部。</p>
+<h1 id=内核模块的装载流程>内核模块的装载流程</h1>
+<p>涉及内核模块的系统调用有三个：</p>
+<ul>
+<li>init_module</li>
+<li>finit_module</li>
+<li>delete_module</li>
+</ul>
+<p>其中，<code>finit_module</code>是<code>init_module</code>的文件描述符形式，可以勉强算作一个。因此，想要理解内核如何装载模块，完成了哪些工作，需要分析<code>init_module</code>函数。之所以称勉强算作一个，是因为<code>finit_module</code>有一个额外的参数，支持传入flags，即：</p>
+<ul>
+<li>MODULE_INIT_IGNORE_MODVERSIONS</li>
+<li>MODULE_INIT_IGNORE_VERMAGIC</li>
+</ul>
+<p>而<code>init_module</code>则不允许。二者的本质都是在做完权限检查（CAP_SYS_MODULE和<code>modules_disabled</code>内核命令行）之后，分配空间存放内核模块ELF文件，然后调用<code>load_module</code>函数。<code>load_modules</code>的参数有三个，其中最关键的是<code>load_info</code>结构体。</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt> 1
 </span><span class=lnt> 2
 </span><span class=lnt> 3
 </span><span class=lnt> 4
@@ -77,7 +253,9 @@
 </span><span class=lnt>17
 </span><span class=lnt>18
 </span><span class=lnt>19
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c><span class=k>struct</span> <span class=n>load_info</span> <span class=p>{</span>
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=k>struct</span> <span class=n>load_info</span> <span class=p>{</span>
         <span class=k>const</span> <span class=kt>char</span> <span class=o>*</span><span class=n>name</span><span class=p>;</span>
         <span class=cm>/* pointer to module in temporary copy, freed at end of load_module() */</span>
         <span class=k>struct</span> <span class=n>module</span> <span class=o>*</span><span class=n>mod</span><span class=p>;</span>
@@ -96,7 +274,60 @@
                 <span class=kt>unsigned</span> <span class=kt>int</span> <span class=n>sym</span><span class=p>,</span> <span class=n>str</span><span class=p>,</span> <span class=n>mod</span><span class=p>,</span> <span class=n>vers</span><span class=p>,</span> <span class=n>info</span><span class=p>,</span> <span class=n>pcpu</span><span class=p>;</span>
         <span class=p>}</span> <span class=n>index</span><span class=p>;</span>
 <span class=p>};</span>
-</code></pre></td></tr></table></div></div><p>在传入<code>load_module</code>时，只有<code>hdr</code>和<code>len</code>字段，被填写为了存放ELF文件内容的地址与长度。对模块装载流程的分析转变成了对<code>load_module</code>函数的分析。</p><h2 id=合法性检查>合法性检查</h2><p>合法性检查不多说，主要有如下几点：</p><ul><li>模块签名检查，由<code>mod_sig_check</code>函数完成。这里多说一句，模块签名是加在模块ELF文件尾部的，模块最尾部有一个<code>magic string</code>，即一个特殊的字符串，内核通过该字符串确定模块是否带有签名。除此之外模块的ELF文件部分不会因为签名而变动。</li><li>ELF文件合法性检查，简单检查ELF的文件结构是否合法。</li><li>获取模块名字之后，检查其是否在<code>module_blacklist</code>内核命令行参数，如果是，则拒绝加载。</li></ul><h2 id=setup_load_info>setup_load_info</h2><p>随后函数调用<code>setup_load_info</code>，从前面看到传入的<code>load_info</code>还是空的，这个函数负责填充它。注意该函数并不是填充所有的字段，而是主要填充<code>index</code>字段，其他部分后面会继续处理。之所以是叫<code>index</code>，是因为其内部字段记录的都是模块ELF文件的section header的索引。函数的主要行为如下：</p><ul><li>遍历搜索<code>.modinfo</code>段，并将其索引保存在<code>index.info</code>字段。从这里可以看出这个section的内容为多个<code>KEY=VALUE</code>的<code>NULL</code>结尾字符串。</li><li>从<code>.modinfo</code>段中可以找到<code>name</code>关键字，将其值作为模块名称保存在<code>load_info->name</code>中。</li><li>遍历搜索模块ELF文件的符号表以及字符串表，将其索引保存至<code>index.sym</code>和<code>index.str</code>。并将<code>load_info->strtab</code>指向ELF文件的字符串表位置。</li><li>遍历搜索<code>.gnu.linkonce.this_module</code>段，并将其索引保存在<code>index.mod</code>中。并将<code>load_info->mod</code>指向该段的首地址。如果前面从<code>.modinfo</code>段中没有找到模块名称，则可以从这个<code>struct module</code>结构体中获取。</li><li>如果调用<code>load_module</code>函数时设置了<code>MODULE_INIT_IGNORE_MODVERSIONS</code>标志，则将<code>index.vers</code>设置为0。反之，则遍历查找<code>__versions</code>段，并设置索引。</li><li>遍历查找<code>.data..percpu</code>段，并设置<code>index.pcpu</code>索引。</li></ul><h2 id=rewrite_section_headers>rewrite_section_headers</h2><p>该函数对模块ELF文件的section header做一些简单处理，包含如下操作：</p><ul><li>将第一个section的<code>sh_addr</code>设置为0</li><li>将其他所有的section的<code>sh_addr</code>指向其当前位于的虚拟地址</li><li>unset掉<code>__versions</code>段和<code>.modinfo</code>段的<code>SHF_ALLOC</code>标志</li></ul><p>稍微做一下解释，在ELF标准中，一个section的<code>sh_addr</code>属性记录section的第一个字节应该被装载的虚拟地址。内核认为模块的第一个section是特殊的，遍历搜索section时的代码都会跳过第一个，即0号section。最后内核遍历section的代码也会跳过所有没有<code>SHF_ALLOC</code>标志的section，即无视没有标为<code>SHF_ALLOC</code>的section。但是很明显，我们最终没有必要将<code>__versions</code>和<code>.modinfo</code>装载至内存中，所以这里unset掉这个标志。</p><h2 id=check_modstruct_versions>check_modstruct_versions</h2><p>详见模块版本机制分析。</p><h2 id=layout_and_allocate>layout_and_allocate</h2><p>函数首先调用<code>check_modinfo</code>检查模块的一些基本信息，包括：</p><ul><li><code>.modinfo</code>中的<code>vermagic</code>，如果<code>MODULE_INIT_IGNORE_VERMAGIC</code>标志设置时，不检查这个<code>vermagic</code>。否则，当<code>vermagic</code>不匹配时阻止加载。</li><li><code>.modinfo</code>中的<code>intree</code>。如果没有找到的话，说明这个模块是out of tree的，照例给个警告</li><li><code>.modinfo</code>中的<code>staging</code>。如果找到的话，说明模块处于staging阶段，照例给个警告</li><li><code>.modinfo</code>中的<code>livepatch</code>。找到的话，如果内核支持live patch，那么标记一下，并给个警告，否则禁止加载</li><li><code>.modinfo</code>中的<code>retpoline</code>。检查模块是否启用<code>retpoline</code>，这个是<code>Spectre V2</code>的检查，目前只有x86有。</li><li><code>.modinfo</code>中的<code>license</code>。检查并设置模块的<code>license</code>，如果与GPL2不兼容，则打出一条警告。</li></ul><p>随后函数调用一个平台相关的函数<code>module_frob_arch_sections</code>，该函数一般会进行一些架构相关的操作，比如处理GOT和PLT，我们后面分析RISC-V的实现。在<code>CONFIG_STRICT_MODULE_RWX</code>配置选项开启时，函数还会检查是否存在即可写又可执行的section，如果存在即阻止模块加载。</p><p>由于模块会对<code>.data..pcpu</code>段进行特殊处理，所以这里unset掉了其<code>SHF_ALLOC</code>标志。同时，函数设置了<code>.data..ro_after_init</code>与<code>__jump_label</code>段的<code>SHF_RO_AFTER_INIT</code>标志。</p><p>随后函数连续调用了三个功能比较大的函数：</p><ul><li>layout_sections</li><li>layout_symtab</li><li>move_module</li></ul><p>其本质上就是准备好接下来需要装载的section的信息，然后申请空间，进行装载，我们拆开来看。</p><h3 id=layout_sections>layout_sections</h3><p>这个函数本质上就是进行最终装载到内存中的sections的布局工作，本质上就是选出需要的section，然后计算出其应该处于的位置，这个位置本质上就是个偏移量。这个操作是ELF文件装载最常见的操作，对于一个section，首先将上一个排放好的section的结尾偏移量做一个对齐操作，即为该section的开头，在将这个开头偏移量加上section的大小，即为section的结尾偏移量。这个操作可以总结成如下helper函数：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
+</code></pre></td></tr></table>
+</div>
+</div><p>在传入<code>load_module</code>时，只有<code>hdr</code>和<code>len</code>字段，被填写为了存放ELF文件内容的地址与长度。对模块装载流程的分析转变成了对<code>load_module</code>函数的分析。</p>
+<h2 id=合法性检查>合法性检查</h2>
+<p>合法性检查不多说，主要有如下几点：</p>
+<ul>
+<li>模块签名检查，由<code>mod_sig_check</code>函数完成。这里多说一句，模块签名是加在模块ELF文件尾部的，模块最尾部有一个<code>magic string</code>，即一个特殊的字符串，内核通过该字符串确定模块是否带有签名。除此之外模块的ELF文件部分不会因为签名而变动。</li>
+<li>ELF文件合法性检查，简单检查ELF的文件结构是否合法。</li>
+<li>获取模块名字之后，检查其是否在<code>module_blacklist</code>内核命令行参数，如果是，则拒绝加载。</li>
+</ul>
+<h2 id=setup_load_info>setup_load_info</h2>
+<p>随后函数调用<code>setup_load_info</code>，从前面看到传入的<code>load_info</code>还是空的，这个函数负责填充它。注意该函数并不是填充所有的字段，而是主要填充<code>index</code>字段，其他部分后面会继续处理。之所以是叫<code>index</code>，是因为其内部字段记录的都是模块ELF文件的section header的索引。函数的主要行为如下：</p>
+<ul>
+<li>遍历搜索<code>.modinfo</code>段，并将其索引保存在<code>index.info</code>字段。从这里可以看出这个section的内容为多个<code>KEY=VALUE</code>的<code>NULL</code>结尾字符串。</li>
+<li>从<code>.modinfo</code>段中可以找到<code>name</code>关键字，将其值作为模块名称保存在<code>load_info->name</code>中。</li>
+<li>遍历搜索模块ELF文件的符号表以及字符串表，将其索引保存至<code>index.sym</code>和<code>index.str</code>。并将<code>load_info->strtab</code>指向ELF文件的字符串表位置。</li>
+<li>遍历搜索<code>.gnu.linkonce.this_module</code>段，并将其索引保存在<code>index.mod</code>中。并将<code>load_info->mod</code>指向该段的首地址。如果前面从<code>.modinfo</code>段中没有找到模块名称，则可以从这个<code>struct module</code>结构体中获取。</li>
+<li>如果调用<code>load_module</code>函数时设置了<code>MODULE_INIT_IGNORE_MODVERSIONS</code>标志，则将<code>index.vers</code>设置为0。反之，则遍历查找<code>__versions</code>段，并设置索引。</li>
+<li>遍历查找<code>.data..percpu</code>段，并设置<code>index.pcpu</code>索引。</li>
+</ul>
+<h2 id=rewrite_section_headers>rewrite_section_headers</h2>
+<p>该函数对模块ELF文件的section header做一些简单处理，包含如下操作：</p>
+<ul>
+<li>将第一个section的<code>sh_addr</code>设置为0</li>
+<li>将其他所有的section的<code>sh_addr</code>指向其当前位于的虚拟地址</li>
+<li>unset掉<code>__versions</code>段和<code>.modinfo</code>段的<code>SHF_ALLOC</code>标志</li>
+</ul>
+<p>稍微做一下解释，在ELF标准中，一个section的<code>sh_addr</code>属性记录section的第一个字节应该被装载的虚拟地址。内核认为模块的第一个section是特殊的，遍历搜索section时的代码都会跳过第一个，即0号section。最后内核遍历section的代码也会跳过所有没有<code>SHF_ALLOC</code>标志的section，即无视没有标为<code>SHF_ALLOC</code>的section。但是很明显，我们最终没有必要将<code>__versions</code>和<code>.modinfo</code>装载至内存中，所以这里unset掉这个标志。</p>
+<h2 id=check_modstruct_versions>check_modstruct_versions</h2>
+<p>详见模块版本机制分析。</p>
+<h2 id=layout_and_allocate>layout_and_allocate</h2>
+<p>函数首先调用<code>check_modinfo</code>检查模块的一些基本信息，包括：</p>
+<ul>
+<li><code>.modinfo</code>中的<code>vermagic</code>，如果<code>MODULE_INIT_IGNORE_VERMAGIC</code>标志设置时，不检查这个<code>vermagic</code>。否则，当<code>vermagic</code>不匹配时阻止加载。</li>
+<li><code>.modinfo</code>中的<code>intree</code>。如果没有找到的话，说明这个模块是out of tree的，照例给个警告</li>
+<li><code>.modinfo</code>中的<code>staging</code>。如果找到的话，说明模块处于staging阶段，照例给个警告</li>
+<li><code>.modinfo</code>中的<code>livepatch</code>。找到的话，如果内核支持live patch，那么标记一下，并给个警告，否则禁止加载</li>
+<li><code>.modinfo</code>中的<code>retpoline</code>。检查模块是否启用<code>retpoline</code>，这个是<code>Spectre V2</code>的检查，目前只有x86有。</li>
+<li><code>.modinfo</code>中的<code>license</code>。检查并设置模块的<code>license</code>，如果与GPL2不兼容，则打出一条警告。</li>
+</ul>
+<p>随后函数调用一个平台相关的函数<code>module_frob_arch_sections</code>，该函数一般会进行一些架构相关的操作，比如处理GOT和PLT，我们后面分析RISC-V的实现。在<code>CONFIG_STRICT_MODULE_RWX</code>配置选项开启时，函数还会检查是否存在即可写又可执行的section，如果存在即阻止模块加载。</p>
+<p>由于模块会对<code>.data..pcpu</code>段进行特殊处理，所以这里unset掉了其<code>SHF_ALLOC</code>标志。同时，函数设置了<code>.data..ro_after_init</code>与<code>__jump_label</code>段的<code>SHF_RO_AFTER_INIT</code>标志。</p>
+<p>随后函数连续调用了三个功能比较大的函数：</p>
+<ul>
+<li>layout_sections</li>
+<li>layout_symtab</li>
+<li>move_module</li>
+</ul>
+<p>其本质上就是准备好接下来需要装载的section的信息，然后申请空间，进行装载，我们拆开来看。</p>
+<h3 id=layout_sections>layout_sections</h3>
+<p>这个函数本质上就是进行最终装载到内存中的sections的布局工作，本质上就是选出需要的section，然后计算出其应该处于的位置，这个位置本质上就是个偏移量。这个操作是ELF文件装载最常见的操作，对于一个section，首先将上一个排放好的section的结尾偏移量做一个对齐操作，即为该section的开头，在将这个开头偏移量加上section的大小，即为section的结尾偏移量。这个操作可以总结成如下helper函数：</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt> 1
 </span><span class=lnt> 2
 </span><span class=lnt> 3
 </span><span class=lnt> 4
@@ -115,7 +346,9 @@
 </span><span class=lnt>17
 </span><span class=lnt>18
 </span><span class=lnt>19
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c><span class=cm>/* Update size with this section: return offset. */</span>
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=cm>/* Update size with this section: return offset. */</span>
 <span class=k>static</span> <span class=kt>long</span> <span class=nf>get_offset</span><span class=p>(</span><span class=k>struct</span> <span class=n>module</span> <span class=o>*</span><span class=n>mod</span><span class=p>,</span> <span class=kt>unsigned</span> <span class=kt>int</span> <span class=o>*</span><span class=n>size</span><span class=p>,</span>
                        <span class=n>Elf_Shdr</span> <span class=o>*</span><span class=n>sechdr</span><span class=p>,</span> <span class=kt>unsigned</span> <span class=kt>int</span> <span class=n>section</span><span class=p>)</span>
 <span class=p>{</span>
@@ -134,7 +367,12 @@
         <span class=cm>/* default implementation just returns zero */</span>
         <span class=k>return</span> <span class=mi>0</span><span class=p>;</span>
 <span class=p>}</span>
-</code></pre></td></tr></table></div></div><p>回到<code>layout_sections</code>函数，函数一共初始化了两个<code>struct module_layout</code>，分别名为<code>core_layout</code>与<code>init_layout</code>。其中<code>init_layout</code>对应着模块的<code>.init</code>段，后面可以进行释放操作。而<code>core_layout</code>即为模块代码空间本身的layout。<code>struct module_layout</code>的结构如下：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
+</code></pre></td></tr></table>
+</div>
+</div><p>回到<code>layout_sections</code>函数，函数一共初始化了两个<code>struct module_layout</code>，分别名为<code>core_layout</code>与<code>init_layout</code>。其中<code>init_layout</code>对应着模块的<code>.init</code>段，后面可以进行释放操作。而<code>core_layout</code>即为模块代码空间本身的layout。<code>struct module_layout</code>的结构如下：</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt> 1
 </span><span class=lnt> 2
 </span><span class=lnt> 3
 </span><span class=lnt> 4
@@ -150,7 +388,9 @@
 </span><span class=lnt>14
 </span><span class=lnt>15
 </span><span class=lnt>16
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c><span class=k>struct</span> <span class=n>module_layout</span> <span class=p>{</span>
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=k>struct</span> <span class=n>module_layout</span> <span class=p>{</span>
         <span class=cm>/* The actual code + data. */</span>
         <span class=kt>void</span> <span class=o>*</span><span class=n>base</span><span class=p>;</span>
         <span class=cm>/* Total size. */</span>
@@ -166,7 +406,12 @@
 </span><span class=cp></span>        <span class=k>struct</span> <span class=n>mod_tree_node</span> <span class=n>mtn</span><span class=p>;</span>
 <span class=cp>#endif
 </span><span class=cp></span><span class=p>};</span>
-</code></pre></td></tr></table></div></div><p><code>layout_sections</code>函数使用一组mask对所有的section进行两次（是否为<code>.init</code>段），成功匹配的section会被加入对应layout中。这组mask如下：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
+</code></pre></td></tr></table>
+</div>
+</div><p><code>layout_sections</code>函数使用一组mask对所有的section进行两次（是否为<code>.init</code>段），成功匹配的section会被加入对应layout中。这组mask如下：</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt> 1
 </span><span class=lnt> 2
 </span><span class=lnt> 3
 </span><span class=lnt> 4
@@ -178,7 +423,9 @@
 </span><span class=lnt>10
 </span><span class=lnt>11
 </span><span class=lnt>12
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c>        <span class=k>static</span> <span class=kt>unsigned</span> <span class=kt>long</span> <span class=k>const</span> <span class=n>masks</span><span class=p>[][</span><span class=mi>2</span><span class=p>]</span> <span class=o>=</span> <span class=p>{</span>
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c>        <span class=k>static</span> <span class=kt>unsigned</span> <span class=kt>long</span> <span class=k>const</span> <span class=n>masks</span><span class=p>[][</span><span class=mi>2</span><span class=p>]</span> <span class=o>=</span> <span class=p>{</span>
                 <span class=cm>/*
 </span><span class=cm>                 * NOTE: all executable code must be the first section
 </span><span class=cm>                 * in this array; otherwise modify the text_size
@@ -190,21 +437,65 @@
                 <span class=p>{</span> <span class=n>SHF_WRITE</span> <span class=o>|</span> <span class=n>SHF_ALLOC</span><span class=p>,</span> <span class=n>ARCH_SHF_SMALL</span> <span class=p>},</span>
                 <span class=p>{</span> <span class=n>ARCH_SHF_SMALL</span> <span class=o>|</span> <span class=n>SHF_ALLOC</span><span class=p>,</span> <span class=mi>0</span> <span class=p>}</span>
         <span class=p>};</span>
-</code></pre></td></tr></table></div></div><p>分别对应于：可执行，只读数据，<code>.data..ro_after_init</code>和<code>__jump_label</code>（INIT后只读数据），可写数据。注意每个mask有两部分，前一部分是匹配项，必须匹配上，后一部分是不匹配项，必须不匹配上。这组mask最后会将有<code>ARCH_SHF_SMALL</code>标志的section放到layout最后面，而<code>ARCH_SHF_SMALL</code>由架构自行定义。</p><p>函数使用了一个trick，即利用section header中的<code>sh_entsize</code>作为临时区域存储偏移量。这是因为<code>sh_entsize</code>一般是用于保存拥有固定元素大小的类似数组的section的元素大小的字段，而这里处理的section很明显没有这样的section。同时，<code>sh_entsize</code>的MSB一位作为一个标志位使用，存储了该section到底是属于<code>core_layout</code>还是<code>init_layout</code>这一信息。</p><h3 id=layout_symtab>layout_symtab</h3><p>该函数仅当<code>CONFIG_KALLSYMS</code>时有定义，否则为空函数。函数工作总结如下：</p><ul><li>将模块ELF文件的符号表放到<code>init_layout</code>的末尾</li><li>找出core symbol，并在<code>core_layout</code>上预留其对应的位置。这里还预留了core symbol使用的字符串表中字符串的空间</li><li>将字符串表放到<code>init_layout</code>末尾</li><li><code>init_layout</code>末尾预留一个<code>struct mod_kallsyms</code>的空间</li></ul><h3 id=move_module>move_module</h3><p>该函数简单通过<code>module_alloc</code>函数申请<code>core_layout</code>与<code>init_layout</code>所占的空间，然后设置对应的<code>core_layout->base</code>与<code>init_layout->base</code>。根据前面所做的标记得到需要拷贝的section的源地址与目标地址，进行拷贝，很明显<code>SHT_NOBITS</code>标记的section（例如.bss）是不用拷贝的。拷贝完成后，函数更新section header的<code>sh_addr</code>字段，指向拷贝后的地址。</p><h2 id=percpu_modalloc>percpu_modalloc</h2><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt>1
+</code></pre></td></tr></table>
+</div>
+</div><p>分别对应于：可执行，只读数据，<code>.data..ro_after_init</code>和<code>__jump_label</code>（INIT后只读数据），可写数据。注意每个mask有两部分，前一部分是匹配项，必须匹配上，后一部分是不匹配项，必须不匹配上。这组mask最后会将有<code>ARCH_SHF_SMALL</code>标志的section放到layout最后面，而<code>ARCH_SHF_SMALL</code>由架构自行定义。</p>
+<p>函数使用了一个trick，即利用section header中的<code>sh_entsize</code>作为临时区域存储偏移量。这是因为<code>sh_entsize</code>一般是用于保存拥有固定元素大小的类似数组的section的元素大小的字段，而这里处理的section很明显没有这样的section。同时，<code>sh_entsize</code>的MSB一位作为一个标志位使用，存储了该section到底是属于<code>core_layout</code>还是<code>init_layout</code>这一信息。</p>
+<h3 id=layout_symtab>layout_symtab</h3>
+<p>该函数仅当<code>CONFIG_KALLSYMS</code>时有定义，否则为空函数。函数工作总结如下：</p>
+<ul>
+<li>将模块ELF文件的符号表放到<code>init_layout</code>的末尾</li>
+<li>找出core symbol，并在<code>core_layout</code>上预留其对应的位置。这里还预留了core symbol使用的字符串表中字符串的空间</li>
+<li>将字符串表放到<code>init_layout</code>末尾</li>
+<li><code>init_layout</code>末尾预留一个<code>struct mod_kallsyms</code>的空间</li>
+</ul>
+<h3 id=move_module>move_module</h3>
+<p>该函数简单通过<code>module_alloc</code>函数申请<code>core_layout</code>与<code>init_layout</code>所占的空间，然后设置对应的<code>core_layout->base</code>与<code>init_layout->base</code>。根据前面所做的标记得到需要拷贝的section的源地址与目标地址，进行拷贝，很明显<code>SHT_NOBITS</code>标记的section（例如.bss）是不用拷贝的。拷贝完成后，函数更新section header的<code>sh_addr</code>字段，指向拷贝后的地址。</p>
+<h2 id=percpu_modalloc>percpu_modalloc</h2>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt>1
 </span><span class=lnt>2
 </span><span class=lnt>3
 </span><span class=lnt>4
 </span><span class=lnt>5
 </span><span class=lnt>6
 </span><span class=lnt>7
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c>        <span class=n>mod</span><span class=o>-&gt;</span><span class=n>percpu</span> <span class=o>=</span> <span class=n>__alloc_reserved_percpu</span><span class=p>(</span><span class=n>pcpusec</span><span class=o>-&gt;</span><span class=n>sh_size</span><span class=p>,</span> <span class=n>align</span><span class=p>);</span>
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c>        <span class=n>mod</span><span class=o>-&gt;</span><span class=n>percpu</span> <span class=o>=</span> <span class=n>__alloc_reserved_percpu</span><span class=p>(</span><span class=n>pcpusec</span><span class=o>-&gt;</span><span class=n>sh_size</span><span class=p>,</span> <span class=n>align</span><span class=p>);</span>
         <span class=k>if</span> <span class=p>(</span><span class=o>!</span><span class=n>mod</span><span class=o>-&gt;</span><span class=n>percpu</span><span class=p>)</span> <span class=p>{</span>
                 <span class=n>pr_warn</span><span class=p>(</span><span class=s>&#34;%s: Could not allocate %lu bytes percpu data</span><span class=se>\n</span><span class=s>&#34;</span><span class=p>,</span>
                         <span class=n>mod</span><span class=o>-&gt;</span><span class=n>name</span><span class=p>,</span> <span class=p>(</span><span class=kt>unsigned</span> <span class=kt>long</span><span class=p>)</span><span class=n>pcpusec</span><span class=o>-&gt;</span><span class=n>sh_size</span><span class=p>);</span>
                 <span class=k>return</span> <span class=o>-</span><span class=n>ENOMEM</span><span class=p>;</span>
         <span class=p>}</span>
         <span class=n>mod</span><span class=o>-&gt;</span><span class=n>percpu_size</span> <span class=o>=</span> <span class=n>pcpusec</span><span class=o>-&gt;</span><span class=n>sh_size</span><span class=p>;</span>
-</code></pre></td></tr></table></div></div><p>函数很简单，唯一需要记住的就是模块的<code>percpu</code>数据的处理方式。Linux直接通过<code>__alloc_reserved_percpu</code>接口申请了模块需要的percpu数据区域，并保存在<code>struct module</code>结构体中。</p><h2 id=find_module_sections>find_module_sections</h2><p>该函数查找特定的section，并初始化<code>struct module</code>的特定字段，比较多，这里不一一列举。</p><h2 id=simplify_symbols>simplify_symbols</h2><p>这个函数的目的是解决所有没有定义的symbol，也就是<code>st_shndx</code>定义为<code>SHN_UNDEF</code>的符号。简单来说，函数遍历符号表，找到<code>SHN_UNDEF</code>类型的符号，然后要求内核resolve该符号。得到该符号的地址后，函数将其填入symbol的<code>st_value</code>字段内。内核符号的机制后面尽心分析，这里只需要知道要求内核对符号进行了解析，并返回了地址。</p><p>除此之外，这个函数还对percpu变量进行了特殊处理。</p><h2 id=apply_relocations>apply_relocations</h2><p>该函数遍历所有的section，然后对以下三种进行处理：</p><ul><li>有SHF_RELA_LIVEPATCH标志的</li><li>SHT_REL类型</li><li>SHT_RELA类型</li></ul><p>这里会调用架构相关的函数<code>apply_relocate</code>和<code>apply_relocate_add</code>对这个可执行程序根据<code>relocation</code>的类型进行<code>relocate</code>操作。这个操作比较常规，就是linker比较常见的行为，后面分析RISC-V下的实现。总之，<code>relocation</code>完成之后，<code>core_layout</code>上的<code>relocation</code>完成了<code>relocate</code>操作，代码段可以正常执行了，对symbol的引用被指向了正确的地址。</p><h2 id=do_module_init>do_module_init</h2><p>在处理完一些杂项之后，<code>do_module_init</code>函数将完整最后的操作。简单来说，这个函数将会调用<code>mod->init</code>函数指针，也就是模块自己实现<code>init_module</code>函数。之后，完成一些通知操作，并释放<code>init_layout</code>所占用的空间。</p><p>这里可以思考一个问题，即<code>mod->init</code>指针是谁设置的？从前面看到<code>mod</code>，即一个<code>struct module</code>类型的变量是被定义在<code>.gnu.linkonce.this_module</code>段中的。整个<code>load_module</code>函数操作过程中，<code>mod</code>指针都是指向这个段的，由于模块ELF是一个<code>relocatable</code>的ELF文件，所以进行<code>relocation</code>时，<code>__this_module</code>上的<code>init</code>指针会被<code>relocation</code>重写，指向<code>init_module</code>装载后的虚拟地址。使得我们调用<code>mod->init</code>时，可以调用模块自己实现的<code>init_module</code>函数。</p><h1 id=内核符号管理机制>内核符号管理机制</h1><p>内核提供了一套机制用于控制模块可以访问的符号。这里有一点需要注意，一旦模块被加载并执行，他是有权力访问整个虚拟地址空间的，内核只能控制其对符号对应地址的请求。可以想象，内核维护了一张表，表中记录了内核向模块导出的接口（符号），以及该符号目前对应的虚拟地址。这张表应该是动态的，因为有KASLR等机制会随机化内核的地址偏移量。</p><h2 id=符号的注册>符号的注册</h2><p>我们最常见的符号注册机制就是<code>EXPORT_SYMBOL</code>宏，这个宏的实现是比较直观的，但是细节很多，可以只抓原理。一般情况下，其定义如下：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
+</code></pre></td></tr></table>
+</div>
+</div><p>函数很简单，唯一需要记住的就是模块的<code>percpu</code>数据的处理方式。Linux直接通过<code>__alloc_reserved_percpu</code>接口申请了模块需要的percpu数据区域，并保存在<code>struct module</code>结构体中。</p>
+<h2 id=find_module_sections>find_module_sections</h2>
+<p>该函数查找特定的section，并初始化<code>struct module</code>的特定字段，比较多，这里不一一列举。</p>
+<h2 id=simplify_symbols>simplify_symbols</h2>
+<p>这个函数的目的是解决所有没有定义的symbol，也就是<code>st_shndx</code>定义为<code>SHN_UNDEF</code>的符号。简单来说，函数遍历符号表，找到<code>SHN_UNDEF</code>类型的符号，然后要求内核resolve该符号。得到该符号的地址后，函数将其填入symbol的<code>st_value</code>字段内。内核符号的机制后面尽心分析，这里只需要知道要求内核对符号进行了解析，并返回了地址。</p>
+<p>除此之外，这个函数还对percpu变量进行了特殊处理。</p>
+<h2 id=apply_relocations>apply_relocations</h2>
+<p>该函数遍历所有的section，然后对以下三种进行处理：</p>
+<ul>
+<li>有SHF_RELA_LIVEPATCH标志的</li>
+<li>SHT_REL类型</li>
+<li>SHT_RELA类型</li>
+</ul>
+<p>这里会调用架构相关的函数<code>apply_relocate</code>和<code>apply_relocate_add</code>对这个可执行程序根据<code>relocation</code>的类型进行<code>relocate</code>操作。这个操作比较常规，就是linker比较常见的行为，后面分析RISC-V下的实现。总之，<code>relocation</code>完成之后，<code>core_layout</code>上的<code>relocation</code>完成了<code>relocate</code>操作，代码段可以正常执行了，对symbol的引用被指向了正确的地址。</p>
+<h2 id=do_module_init>do_module_init</h2>
+<p>在处理完一些杂项之后，<code>do_module_init</code>函数将完整最后的操作。简单来说，这个函数将会调用<code>mod->init</code>函数指针，也就是模块自己实现<code>init_module</code>函数。之后，完成一些通知操作，并释放<code>init_layout</code>所占用的空间。</p>
+<p>这里可以思考一个问题，即<code>mod->init</code>指针是谁设置的？从前面看到<code>mod</code>，即一个<code>struct module</code>类型的变量是被定义在<code>.gnu.linkonce.this_module</code>段中的。整个<code>load_module</code>函数操作过程中，<code>mod</code>指针都是指向这个段的，由于模块ELF是一个<code>relocatable</code>的ELF文件，所以进行<code>relocation</code>时，<code>__this_module</code>上的<code>init</code>指针会被<code>relocation</code>重写，指向<code>init_module</code>装载后的虚拟地址。使得我们调用<code>mod->init</code>时，可以调用模块自己实现的<code>init_module</code>函数。</p>
+<h1 id=内核符号管理机制>内核符号管理机制</h1>
+<p>内核提供了一套机制用于控制模块可以访问的符号。这里有一点需要注意，一旦模块被加载并执行，他是有权力访问整个虚拟地址空间的，内核只能控制其对符号对应地址的请求。可以想象，内核维护了一张表，表中记录了内核向模块导出的接口（符号），以及该符号目前对应的虚拟地址。这张表应该是动态的，因为有KASLR等机制会随机化内核的地址偏移量。</p>
+<h2 id=符号的注册>符号的注册</h2>
+<p>我们最常见的符号注册机制就是<code>EXPORT_SYMBOL</code>宏，这个宏的实现是比较直观的，但是细节很多，可以只抓原理。一般情况下，其定义如下：</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt> 1
 </span><span class=lnt> 2
 </span><span class=lnt> 3
 </span><span class=lnt> 4
@@ -243,7 +534,9 @@
 </span><span class=lnt>37
 </span><span class=lnt>38
 </span><span class=lnt>39
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c><span class=cp>#define ___EXPORT_SYMBOL(sym, sec, ns)                                          \
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=cp>#define ___EXPORT_SYMBOL(sym, sec, ns)                                          \
 </span><span class=cp>        extern typeof(sym) sym;                                                 \
 </span><span class=cp>        extern const char __kstrtab_##sym[];                                    \
 </span><span class=cp>        extern const char __kstrtabns_##sym[];                                  \
@@ -282,28 +575,110 @@
 </span><span class=cp>#define EXPORT_SYMBOL_GPL(sym)          _EXPORT_SYMBOL(sym, &#34;_gpl&#34;)
 </span><span class=cp>#define EXPORT_SYMBOL_NS(sym, ns)       __EXPORT_SYMBOL(sym, &#34;&#34;, #ns)
 </span><span class=cp>#define EXPORT_SYMBOL_NS_GPL(sym, ns)   __EXPORT_SYMBOL(sym, &#34;_gpl&#34;, #ns)
-</span></code></pre></td></tr></table></div></div><p>可以看到<code>EXPORT_SYMBOL</code>也是利用section操作实现的。简单来说，当调用<code>EXPORT_SYMBOL</code>时：</p><ul><li>生成<code>__kstrtab_##sym</code>，<code>__kstrtabns_##sym</code> 两个symbol，其内容位于<code>__ksymtab_strings</code>段中。</li><li>定义一个名为<code> </code>的<code>struct kernel_symbol</code>，放入<code>__ksymtab+#sym</code>或者<code>__ksymtab_gpl+#sym</code>段中，这个结构体的内容是symbol位于的地址，以及其两个定义在<code>__ksymtab_strings</code>中的两个字符串。后面看一下KASLR的实现，应该会比较有意思。同样，连接脚本里的合并section操作也是个细节。</li><li>如果<code>CONFIG_MODVERSIONS</code>有定义，则<code>__CRC_SYMBOL</code>会为symbol定义一个CRC值，用以验证symbol的版本，后面分析。</li></ul><p>回到链接脚本的实现，可以发现与<code>__ksymtab</code>有关的段都定义在<code>RODATA</code>宏里。首先是<code>__ksymtab</code>：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt>1
+</span></code></pre></td></tr></table>
+</div>
+</div><p>可以看到<code>EXPORT_SYMBOL</code>也是利用section操作实现的。简单来说，当调用<code>EXPORT_SYMBOL</code>时：</p>
+<ul>
+<li>生成<code>__kstrtab_##sym</code>，<code>__kstrtabns_##sym</code> 两个symbol，其内容位于<code>__ksymtab_strings</code>段中。</li>
+<li>定义一个名为<code> </code>的<code>struct kernel_symbol</code>，放入<code>__ksymtab+#sym</code>或者<code>__ksymtab_gpl+#sym</code>段中，这个结构体的内容是symbol位于的地址，以及其两个定义在<code>__ksymtab_strings</code>中的两个字符串。后面看一下KASLR的实现，应该会比较有意思。同样，连接脚本里的合并section操作也是个细节。</li>
+<li>如果<code>CONFIG_MODVERSIONS</code>有定义，则<code>__CRC_SYMBOL</code>会为symbol定义一个CRC值，用以验证symbol的版本，后面分析。</li>
+</ul>
+<p>回到链接脚本的实现，可以发现与<code>__ksymtab</code>有关的段都定义在<code>RODATA</code>宏里。首先是<code>__ksymtab</code>：</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt>1
 </span><span class=lnt>2
 </span><span class=lnt>3
 </span><span class=lnt>4
 </span><span class=lnt>5
 </span><span class=lnt>6
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c>        <span class=cm>/* Kernel symbol table: Normal symbols */</span>                       \
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c>        <span class=cm>/* Kernel symbol table: Normal symbols */</span>                       \
         <span class=nl>__ksymtab</span>         <span class=p>:</span> <span class=n>AT</span><span class=p>(</span><span class=n>ADDR</span><span class=p>(</span><span class=n>__ksymtab</span><span class=p>)</span> <span class=o>-</span> <span class=n>LOAD_OFFSET</span><span class=p>)</span> <span class=p>{</span>         \
                 <span class=n>__start___ksymtab</span> <span class=o>=</span> <span class=p>.;</span>                                  \
                 <span class=n>KEEP</span><span class=p>(</span><span class=o>*</span><span class=p>(</span><span class=n>SORT</span><span class=p>(</span><span class=n>___ksymtab</span><span class=o>+*</span><span class=p>)))</span>                             \
                 <span class=n>__stop___ksymtab</span> <span class=o>=</span> <span class=p>.;</span>                                   \
         <span class=p>}</span>                                                               \
-</code></pre></td></tr></table></div></div><p>可以看到，前面定义的<code>__ksymtab+#sym</code>段被排序，并合并成了<code>__ksymtab</code>段。同理，其他的section也是类似的方式合并。</p><h2 id=符号的查找>符号的查找</h2><p>前面看到符号是通过<code>find_symbol</code>函数实现的，下面来分析这个函数。这个函数其实很直观了，符合我们的认知，函数简单从两个地方查找symbol：</p><ul><li>内核镜像本身</li><li>所有加载到内核的模块中</li></ul><p>由于模块和内核镜像储存的符号的机制几乎一样，所以搜索代码是一样的，只是参数的区别。前面看到连接成镜像时，所有的symbol是根据符号名称进行排序的，所以我们可以简单使用二分法对特定的值进行查找，确定整个<code>__ksymtab</code>中是否存在这个符号。</p></div><div class=post-copyright><p class=copyright-item><span class=item-title>文章作者</span>
-<span class=item-content>crab2313</span></p><p class=copyright-item><span class=item-title>上次更新</span>
-<span class=item-content>2021-06-28
-<a href=https://github.com/crab2313/blog-doc/commit/d306af0bf260ea3cd5dc644f326d41a8b8a2c5e5 title="blog: kernel module: fix typos">(d306af0)</a></span></p></div><footer class=post-footer><div class=post-tags><a href=/tags/kernel/>kernel</a>
-<a href=/tags/binary/>binary</a></div><nav class=post-nav><a class=next href=/post/static-key/><span class="next-text nav-default">Linux内核在RISC-V平台下的static key机制</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>可以看到，前面定义的<code>__ksymtab+#sym</code>段被排序，并合并成了<code>__ksymtab</code>段。同理，其他的section也是类似的方式合并。</p>
+<h2 id=符号的查找>符号的查找</h2>
+<p>前面看到符号是通过<code>find_symbol</code>函数实现的，下面来分析这个函数。这个函数其实很直观了，符合我们的认知，函数简单从两个地方查找symbol：</p>
+<ul>
+<li>内核镜像本身</li>
+<li>所有加载到内核的模块中</li>
+</ul>
+<p>由于模块和内核镜像储存的符号的机制几乎一样，所以搜索代码是一样的，只是参数的区别。前面看到连接成镜像时，所有的symbol是根据符号名称进行排序的，所以我们可以简单使用二分法对特定的值进行查找，确定整个<code>__ksymtab</code>中是否存在这个符号。</p>
+</div>
+<div class=post-copyright>
+<p class=copyright-item>
+<span class=item-title>文章作者</span>
+<span class=item-content>crab2313</span>
+</p>
+<p class=copyright-item>
+<span class=item-title>上次更新</span>
+<span class=item-content>
+2021-06-28
+<a href=https://github.com/crab2313/blog-doc/commit/d306af0bf260ea3cd5dc644f326d41a8b8a2c5e5 title="blog: kernel module: fix typos">(d306af0)</a>
+</span>
+</p>
+</div>
+<footer class=post-footer>
+<div class=post-tags>
+<a href=/tags/kernel/>kernel</a>
+<a href=/tags/binary/>binary</a>
+</div>
+<nav class=post-nav>
+<a class=prev href=/post/mesa-gbm/>
+<i class="iconfont icon-left"></i>
+<span class="prev-text nav-default">MESA源码分析：GBM的使用与实现</span>
+<span class="prev-text nav-mobile">上一篇</span>
+</a>
+<a class=next href=/post/static-key/>
+<span class="next-text nav-default">Linux内核在RISC-V平台下的static key机制</span>
 <span class="next-text nav-mobile">下一篇</span>
-<i class="iconfont icon-right"></i></a></nav></footer></article></div></div></main><footer id=footer class=footer><div class=social-links><a href=mailto:crab2313@gmail.com class="iconfont icon-email" title=email></a><a href=https://github.com/crab2313 class="iconfont icon-github" title=github></a><a href=https://gitlab.com/crab2313 class="iconfont icon-gitlab" title=gitlab></a><a href=https://space.bilibili.com/1310103 class="iconfont icon-bilibili" title=bilibili></a><a href=/index.xml type=application/rss+xml class="iconfont icon-rss" title=rss></a></div><div class=copyright><span class=power-by>由 <a class=hexo-link href=https://gohugo.io>Hugo</a> 强力驱动</span>
+<i class="iconfont icon-right"></i>
+</a>
+</nav>
+</footer>
+</article>
+</div>
+</div>
+</main>
+<footer id=footer class=footer>
+<div class=social-links>
+<a href=mailto:crab2313@gmail.com class="iconfont icon-email" title=email></a>
+<a href=https://github.com/crab2313 class="iconfont icon-github" title=github></a>
+<a href=https://gitlab.com/crab2313 class="iconfont icon-gitlab" title=gitlab></a>
+<a href=https://space.bilibili.com/1310103 class="iconfont icon-bilibili" title=bilibili></a>
+<a href=/index.xml type=application/rss+xml class="iconfont icon-rss" title=rss></a>
+</div>
+<div class=copyright>
+<span class=power-by>
+由 <a class=hexo-link href=https://gohugo.io>Hugo</a> 强力驱动
+</span>
 <span class=division>|</span>
-<span class=theme-info>主题 -
-<a class=theme-link href=https://github.com/olOwOlo/hugo-theme-even>Even</a></span>
-<span class=copyright-year>&copy;
+<span class=theme-info>
+主题 -
+<a class=theme-link href=https://github.com/olOwOlo/hugo-theme-even>Even</a>
+</span>
+<span class=copyright-year>
+&copy;
 2017 -
-2021<span class=heart><i class="iconfont icon-heart"></i></span><span>crab2313</span></span></div></footer><div class=back-to-top id=back-to-top><i class="iconfont icon-up"></i></div></div><script src=https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin=anonymous></script><script src=https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin=anonymous></script><script src=https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin=anonymous></script><script type=text/javascript src=/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js></script><script type=text/javascript>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']]}}</script><script async src=https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin=anonymous></script></body></html>
+2021<span class=heart><i class="iconfont icon-heart"></i></span><span>crab2313</span>
+</span>
+</div>
+</footer>
+<div class=back-to-top id=back-to-top>
+<i class="iconfont icon-up"></i>
+</div>
+</div>
+<script src=https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin=anonymous></script>
+<script src=https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin=anonymous></script>
+<script src=https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin=anonymous></script>
+<script type=text/javascript src=/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js></script>
+<script type=text/javascript>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']]}}</script>
+<script async src=https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin=anonymous></script>
+</body>
+</html>

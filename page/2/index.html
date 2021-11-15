@@ -1,10 +1,260 @@
-<!doctype html><html lang=zh-cn><head><meta charset=utf-8><meta http-equiv=x-ua-compatible content="IE=edge,chrome=1"><title>crab2313's blog</title><meta name=renderer content="webkit"><meta name=viewport content="width=device-width,initial-scale=1,maximum-scale=1"><meta http-equiv=cache-control content="no-transform"><meta http-equiv=cache-control content="no-siteapp"><meta name=theme-color content="#f8f5ec"><meta name=msapplication-navbutton-color content="#f8f5ec"><meta name=apple-mobile-web-app-capable content="yes"><meta name=apple-mobile-web-app-status-bar-style content="#f8f5ec"><meta name=author content="crab2313"><meta name=description content="yet another personal blog"><meta name=keywords content="blog,kernel"><meta name=generator content="Hugo 0.84.1 with theme even"><link rel=canonical href=/><link href=/index.xml rel=alternate type=application/rss+xml title="crab2313's blog"><link href=/index.xml rel=feed type=application/rss+xml title="crab2313's blog"><link rel=apple-touch-icon sizes=180x180 href=/apple-touch-icon.png><link rel=icon type=image/png sizes=32x32 href=/favicon-32x32.png><link rel=icon type=image/png sizes=16x16 href=/favicon-16x16.png><link rel=manifest href=/manifest.json><link rel=mask-icon href=/safari-pinned-tab.svg color=#5bbad5><link href=/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css rel=stylesheet><link rel=stylesheet href=https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin=anonymous><meta property="og:title" content="crab2313's blog"><meta property="og:description" content="yet another personal blog"><meta property="og:type" content="website"><meta property="og:url" content="/"><meta itemprop=name content="crab2313's blog"><meta itemprop=description content="yet another personal blog"><meta name=twitter:card content="summary"><meta name=twitter:title content="crab2313's blog"><meta name=twitter:description content="yet another personal blog"><!--[if lte IE 9]><script src=https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js></script><![endif]--><!--[if lt IE 9]><script src=https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js></script><script src=https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js></script><![endif]--></head><body><div id=mobile-navbar class=mobile-navbar><div class=mobile-header-logo><a href=/ class=logo>crab2313's blog</a></div><div class=mobile-navbar-icon><span></span><span></span><span></span></div></div><nav id=mobile-menu class="mobile-menu slideout-menu"><ul class=mobile-menu-list><a href=/><li class=mobile-menu-item>Home</li></a><a href=/post/><li class=mobile-menu-item>Archives</li></a><a href=/tags/><li class=mobile-menu-item>Tags</li></a><a href=/categories/><li class=mobile-menu-item>Categories</li></a></ul></nav><div class=container id=mobile-panel><header id=header class=header><div class=logo-wrapper><a href=/ class=logo>crab2313's blog</a></div><nav class=site-navbar><ul id=menu class=menu><li class=menu-item><a class=menu-item-link href=/>Home</a></li><li class=menu-item><a class=menu-item-link href=/post/>Archives</a></li><li class=menu-item><a class=menu-item-link href=/tags/>Tags</a></li><li class=menu-item><a class=menu-item-link href=/categories/>Categories</a></li></ul></nav></header><main id=main class=main><div class=content-wrapper><div id=content class=content><section id=posts class=posts><article class=post><header class=post-header><h1 class=post-title><a class=post-link href=/post/drm-legacy-kms/>DRM框架分析（二）：KMS</a></h1><div class=post-meta><span class=post-time>2021-03-26</span></div></header><div class=post-content><div class=post-summary>KMS全称是Kernel Mode Setting，这里的mode是指显示控制器的mode，详见下面对drm_mode的分析。与KMS相对应的是Use</div><div class=read-more><a href=/post/drm-legacy-kms/ class=read-more-link>阅读更多</a></div></div></article><article class=post><header class=post-header><h1 class=post-title><a class=post-link href=/post/roadmap/>路线指引</a></h1><div class=post-meta><span class=post-time>2021-03-16</span></div></header><div class=post-content><div class=post-summary>今天和大佬面谈，收获非常大。我觉得我有必要立即记录下来，形成日后的学习路线。首先大佬指出了我自身的不足： 没有做自己的东西。也就是说，我所有的</div><div class=read-more><a href=/post/roadmap/ class=read-more-link>阅读更多</a></div></div></article><article class=post><header class=post-header><h1 class=post-title><a class=post-link href=/post/multicast/>Linux内核组播包接收流程分析</a></h1><div class=post-meta><span class=post-time>2021-03-08</span></div></header><div class=post-content><div class=post-summary>本文直接分析组播接收的流程细节。由于工作需要，暂且分析2.6.32内核的相关细节，并将分析文档记录于此。 驱动层 TCP/IP协议栈是典型的ti</div><div class=read-more><a href=/post/multicast/ class=read-more-link>阅读更多</a></div></div></article><article class=post><header class=post-header><h1 class=post-title><a class=post-link href=/post/clutter/>Clutter代码分析</a></h1><div class=post-meta><span class=post-time>2020-10-19</span></div></header><div class=post-content><div class=post-summary>本文尝试分析Clutter代码实现，其目的是获取调试Mutter代码bug的能力。Clutter的基本知识可以从网络获取，后面会贴一些基础文</div><div class=read-more><a href=/post/clutter/ class=read-more-link>阅读更多</a></div></div></article><article class=post><header class=post-header><h1 class=post-title><a class=post-link href=/post/mutter-a-kms/>Mutter实现分析：Atomic Modesetting</a></h1><div class=post-meta><span class=post-time>2020-09-29</span></div></header><div class=post-content><div class=post-summary>首先注意一个名字上的区分，一开始看代码的人可能会对命名有疑惑。在Jonas的设计中，整个KMS相关代码分为两个上下文：main和impl。m</div><div class=read-more><a href=/post/mutter-a-kms/ class=read-more-link>阅读更多</a></div></div></article><article class=post><header class=post-header><h1 class=post-title><a class=post-link href=/post/mutter/>Mutter窗口管理器实现分析</a></h1><div class=post-meta><span class=post-time>2020-09-27</span></div></header><div class=post-content><div class=post-summary>本文是我对理解Mutter运行机制以及Linux的DRM子系统的一次尝试。之前的尝试似乎由于种种原因没有进行下去，而我最近深受GNOME下各</div><div class=read-more><a href=/post/mutter/ class=read-more-link>阅读更多</a></div></div></article><article class=post><header class=post-header><h1 class=post-title><a class=post-link href=/post/riscv-atomic-barrier-bitops/>Linux内核在RISC-V架构下的内存屏障与原子操作</a></h1><div class=post-meta><span class=post-time>2020-08-14</span></div></header><div class=post-content><div class=post-summary>内存一致性模型是一个体系结构中至关重要的一部分，本质上为软件与硬件之间的契约。软件开发人员可以从内存一致性模型中得知硬件进行内存操作时可能的</div><div class=read-more><a href=/post/riscv-atomic-barrier-bitops/ class=read-more-link>阅读更多</a></div></div></article><article class=post><header class=post-header><h1 class=post-title><a class=post-link href=/post/riscv-setup-arch-exception/>Linux内核在RISC-V架构下的setup_arch与异常处理</a></h1><div class=post-meta><span class=post-time>2020-08-05</span></div></header><div class=post-content><div class=post-summary>在分析完Linux内核在RISC-V架构下的启动流程后，我们分析Linux下与RISC-V相关的架构相关实现。很明显，这类知识都是非常零散的</div><div class=read-more><a href=/post/riscv-setup-arch-exception/ class=read-more-link>阅读更多</a></div></div></article></section><nav class=pagination><a class=prev href=/><i class="iconfont icon-left"></i>
-<span class=prev-text>上一页</span></a>
-<a class=next href=/page/3/><span class=next-text>下一页</span>
-<i class="iconfont icon-right"></i></a></nav></div></div></main><footer id=footer class=footer><div class=social-links><a href=mailto:crab2313@gmail.com class="iconfont icon-email" title=email></a><a href=https://github.com/crab2313 class="iconfont icon-github" title=github></a><a href=https://gitlab.com/crab2313 class="iconfont icon-gitlab" title=gitlab></a><a href=https://space.bilibili.com/1310103 class="iconfont icon-bilibili" title=bilibili></a><a href=/index.xml type=application/rss+xml class="iconfont icon-rss" title=rss></a></div><div class=copyright><span class=power-by>由 <a class=hexo-link href=https://gohugo.io>Hugo</a> 强力驱动</span>
+<!doctype html><html lang=zh-cn>
+<head>
+<meta charset=utf-8>
+<meta http-equiv=x-ua-compatible content="IE=edge,chrome=1">
+<title>crab2313's blog</title>
+<meta name=renderer content="webkit">
+<meta name=viewport content="width=device-width,initial-scale=1,maximum-scale=1">
+<meta http-equiv=cache-control content="no-transform">
+<meta http-equiv=cache-control content="no-siteapp">
+<meta name=theme-color content="#f8f5ec">
+<meta name=msapplication-navbutton-color content="#f8f5ec">
+<meta name=apple-mobile-web-app-capable content="yes">
+<meta name=apple-mobile-web-app-status-bar-style content="#f8f5ec">
+<meta name=author content="crab2313"><meta name=description content="yet another personal blog"><meta name=keywords content="blog,kernel">
+<meta name=generator content="Hugo 0.89.2 with theme even">
+<link rel=canonical href=/>
+<link href=/index.xml rel=alternate type=application/rss+xml title="crab2313's blog">
+<link href=/index.xml rel=feed type=application/rss+xml title="crab2313's blog">
+<link rel=apple-touch-icon sizes=180x180 href=/apple-touch-icon.png>
+<link rel=icon type=image/png sizes=32x32 href=/favicon-32x32.png>
+<link rel=icon type=image/png sizes=16x16 href=/favicon-16x16.png>
+<link rel=manifest href=/manifest.json>
+<link rel=mask-icon href=/safari-pinned-tab.svg color=#5bbad5>
+<link href=/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css rel=stylesheet>
+<link rel=stylesheet href=https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin=anonymous>
+<meta property="og:title" content="crab2313's blog">
+<meta property="og:description" content="yet another personal blog">
+<meta property="og:type" content="website">
+<meta property="og:url" content="/">
+<meta itemprop=name content="crab2313's blog">
+<meta itemprop=description content="yet another personal blog"><meta name=twitter:card content="summary">
+<meta name=twitter:title content="crab2313's blog">
+<meta name=twitter:description content="yet another personal blog"><!--[if lte IE 9]><script src=https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js></script><![endif]--><!--[if lt IE 9]><script src=https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js></script>
+<script src=https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js></script><![endif]-->
+</head>
+<body>
+<div id=mobile-navbar class=mobile-navbar>
+<div class=mobile-header-logo>
+<a href=/ class=logo>crab2313's blog</a>
+</div>
+<div class=mobile-navbar-icon>
+<span></span>
+<span></span>
+<span></span>
+</div>
+</div>
+<nav id=mobile-menu class="mobile-menu slideout-menu">
+<ul class=mobile-menu-list>
+<a href=/>
+<li class=mobile-menu-item>Home</li>
+</a><a href=/post/>
+<li class=mobile-menu-item>Archives</li>
+</a><a href=/tags/>
+<li class=mobile-menu-item>Tags</li>
+</a><a href=/categories/>
+<li class=mobile-menu-item>Categories</li>
+</a>
+</ul>
+</nav>
+<div class=container id=mobile-panel>
+<header id=header class=header>
+<div class=logo-wrapper>
+<a href=/ class=logo>crab2313's blog</a>
+</div>
+<nav class=site-navbar>
+<ul id=menu class=menu>
+<li class=menu-item>
+<a class=menu-item-link href=/>Home</a>
+</li><li class=menu-item>
+<a class=menu-item-link href=/post/>Archives</a>
+</li><li class=menu-item>
+<a class=menu-item-link href=/tags/>Tags</a>
+</li><li class=menu-item>
+<a class=menu-item-link href=/categories/>Categories</a>
+</li>
+</ul>
+</nav>
+</header>
+<main id=main class=main>
+<div class=content-wrapper>
+<div id=content class=content>
+<section id=posts class=posts>
+<article class=post>
+<header class=post-header>
+<h1 class=post-title><a class=post-link href=/post/drm-vram/>DRM框架分析（三）：显存管理</a></h1>
+<div class=post-meta>
+<span class=post-time> 2021-03-28 </span>
+</div>
+</header>
+<div class=post-content>
+<div class=post-summary>
+GEM GEM与TTM之间的关系 TTM是内核最初的DRM显存管理器，其设计思想是试图为所有的显卡驱动提供一个公共的API。TTM后面被认为是失败的
+</div>
+<div class=read-more>
+<a href=/post/drm-vram/ class=read-more-link>阅读更多</a>
+</div>
+</div>
+</article>
+<article class=post>
+<header class=post-header>
+<h1 class=post-title><a class=post-link href=/post/drm-legacy-kms/>DRM框架分析（二）：KMS</a></h1>
+<div class=post-meta>
+<span class=post-time> 2021-03-26 </span>
+</div>
+</header>
+<div class=post-content>
+<div class=post-summary>
+KMS全称是Kernel Mode Setting，这里的mode是指显示控制器的mode，详见下面对drm_mode的分析。与KMS相对应的是Use
+</div>
+<div class=read-more>
+<a href=/post/drm-legacy-kms/ class=read-more-link>阅读更多</a>
+</div>
+</div>
+</article>
+<article class=post>
+<header class=post-header>
+<h1 class=post-title><a class=post-link href=/post/roadmap/>路线指引</a></h1>
+<div class=post-meta>
+<span class=post-time> 2021-03-16 </span>
+</div>
+</header>
+<div class=post-content>
+<div class=post-summary>
+今天和大佬面谈，收获非常大。我觉得我有必要立即记录下来，形成日后的学习路线。首先大佬指出了我自身的不足： 没有做自己的东西。也就是说，我所有的
+</div>
+<div class=read-more>
+<a href=/post/roadmap/ class=read-more-link>阅读更多</a>
+</div>
+</div>
+</article>
+<article class=post>
+<header class=post-header>
+<h1 class=post-title><a class=post-link href=/post/multicast/>Linux内核组播包接收流程分析</a></h1>
+<div class=post-meta>
+<span class=post-time> 2021-03-08 </span>
+</div>
+</header>
+<div class=post-content>
+<div class=post-summary>
+本文直接分析组播接收的流程细节。由于工作需要，暂且分析2.6.32内核的相关细节，并将分析文档记录于此。 驱动层 TCP/IP协议栈是典型的ti
+</div>
+<div class=read-more>
+<a href=/post/multicast/ class=read-more-link>阅读更多</a>
+</div>
+</div>
+</article>
+<article class=post>
+<header class=post-header>
+<h1 class=post-title><a class=post-link href=/post/clutter/>Clutter代码分析</a></h1>
+<div class=post-meta>
+<span class=post-time> 2020-10-19 </span>
+</div>
+</header>
+<div class=post-content>
+<div class=post-summary>
+本文尝试分析Clutter代码实现，其目的是获取调试Mutter代码bug的能力。Clutter的基本知识可以从网络获取，后面会贴一些基础文
+</div>
+<div class=read-more>
+<a href=/post/clutter/ class=read-more-link>阅读更多</a>
+</div>
+</div>
+</article>
+<article class=post>
+<header class=post-header>
+<h1 class=post-title><a class=post-link href=/post/mutter-a-kms/>Mutter实现分析：Atomic Modesetting</a></h1>
+<div class=post-meta>
+<span class=post-time> 2020-09-29 </span>
+</div>
+</header>
+<div class=post-content>
+<div class=post-summary>
+首先注意一个名字上的区分，一开始看代码的人可能会对命名有疑惑。在Jonas的设计中，整个KMS相关代码分为两个上下文：main和impl。m
+</div>
+<div class=read-more>
+<a href=/post/mutter-a-kms/ class=read-more-link>阅读更多</a>
+</div>
+</div>
+</article>
+<article class=post>
+<header class=post-header>
+<h1 class=post-title><a class=post-link href=/post/mutter/>Mutter窗口管理器实现分析</a></h1>
+<div class=post-meta>
+<span class=post-time> 2020-09-27 </span>
+</div>
+</header>
+<div class=post-content>
+<div class=post-summary>
+本文是我对理解Mutter运行机制以及Linux的DRM子系统的一次尝试。之前的尝试似乎由于种种原因没有进行下去，而我最近深受GNOME下各
+</div>
+<div class=read-more>
+<a href=/post/mutter/ class=read-more-link>阅读更多</a>
+</div>
+</div>
+</article>
+<article class=post>
+<header class=post-header>
+<h1 class=post-title><a class=post-link href=/post/riscv-atomic-barrier-bitops/>Linux内核在RISC-V架构下的内存屏障与原子操作</a></h1>
+<div class=post-meta>
+<span class=post-time> 2020-08-14 </span>
+</div>
+</header>
+<div class=post-content>
+<div class=post-summary>
+内存一致性模型是一个体系结构中至关重要的一部分，本质上为软件与硬件之间的契约。软件开发人员可以从内存一致性模型中得知硬件进行内存操作时可能的
+</div>
+<div class=read-more>
+<a href=/post/riscv-atomic-barrier-bitops/ class=read-more-link>阅读更多</a>
+</div>
+</div>
+</article>
+</section>
+<nav class=pagination>
+<a class=prev href=/>
+<i class="iconfont icon-left"></i>
+<span class=prev-text>上一页</span>
+</a>
+<a class=next href=/page/3/>
+<span class=next-text>下一页</span>
+<i class="iconfont icon-right"></i>
+</a>
+</nav>
+</div>
+</div>
+</main>
+<footer id=footer class=footer>
+<div class=social-links>
+<a href=mailto:crab2313@gmail.com class="iconfont icon-email" title=email></a>
+<a href=https://github.com/crab2313 class="iconfont icon-github" title=github></a>
+<a href=https://gitlab.com/crab2313 class="iconfont icon-gitlab" title=gitlab></a>
+<a href=https://space.bilibili.com/1310103 class="iconfont icon-bilibili" title=bilibili></a>
+<a href=/index.xml type=application/rss+xml class="iconfont icon-rss" title=rss></a>
+</div>
+<div class=copyright>
+<span class=power-by>
+由 <a class=hexo-link href=https://gohugo.io>Hugo</a> 强力驱动
+</span>
 <span class=division>|</span>
-<span class=theme-info>主题 -
-<a class=theme-link href=https://github.com/olOwOlo/hugo-theme-even>Even</a></span>
-<span class=copyright-year>&copy;
+<span class=theme-info>
+主题 -
+<a class=theme-link href=https://github.com/olOwOlo/hugo-theme-even>Even</a>
+</span>
+<span class=copyright-year>
+&copy;
 2017 -
-2021<span class=heart><i class="iconfont icon-heart"></i></span><span>crab2313</span></span></div></footer><div class=back-to-top id=back-to-top><i class="iconfont icon-up"></i></div></div><script src=https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin=anonymous></script><script src=https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin=anonymous></script><script src=https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin=anonymous></script><script type=text/javascript src=/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js></script><script type=text/javascript>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']]}}</script><script async src=https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin=anonymous></script></body></html>
+2021<span class=heart><i class="iconfont icon-heart"></i></span><span>crab2313</span>
+</span>
+</div>
+</footer>
+<div class=back-to-top id=back-to-top>
+<i class="iconfont icon-up"></i>
+</div>
+</div>
+<script src=https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin=anonymous></script>
+<script src=https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin=anonymous></script>
+<script src=https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin=anonymous></script>
+<script type=text/javascript src=/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js></script>
+<script type=text/javascript>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']]}}</script>
+<script async src=https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin=anonymous></script>
+</body>
+</html>

@@ -1,24 +1,239 @@
-<!doctype html><html lang=zh-cn><head><meta charset=utf-8><meta http-equiv=x-ua-compatible content="IE=edge,chrome=1"><title>Mutter窗口管理器实现分析 - crab2313's blog</title><meta name=renderer content="webkit"><meta name=viewport content="width=device-width,initial-scale=1,maximum-scale=1"><meta http-equiv=cache-control content="no-transform"><meta http-equiv=cache-control content="no-siteapp"><meta name=theme-color content="#f8f5ec"><meta name=msapplication-navbutton-color content="#f8f5ec"><meta name=apple-mobile-web-app-capable content="yes"><meta name=apple-mobile-web-app-status-bar-style content="#f8f5ec"><meta name=author content="crab2313"><meta name=description content="本文是我对理解Mutter运行机制以及Linux的DRM子系统的一次尝试。之前的尝试似乎由于种种原因没有进行下去，而我最近深受GNOME下各"><meta name=keywords content="blog,kernel"><meta name=generator content="Hugo 0.84.1 with theme even"><link rel=canonical href=/post/mutter/><link rel=apple-touch-icon sizes=180x180 href=/apple-touch-icon.png><link rel=icon type=image/png sizes=32x32 href=/favicon-32x32.png><link rel=icon type=image/png sizes=16x16 href=/favicon-16x16.png><link rel=manifest href=/manifest.json><link rel=mask-icon href=/safari-pinned-tab.svg color=#5bbad5><link href=/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css rel=stylesheet><link rel=stylesheet href=https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin=anonymous><meta property="og:title" content="Mutter窗口管理器实现分析"><meta property="og:description" content="本文是我对理解Mutter运行机制以及Linux的DRM子系统的一次尝试。之前的尝试似乎由于种种原因没有进行下去，而我最近深受GNOME下各"><meta property="og:type" content="article"><meta property="og:url" content="/post/mutter/"><meta property="article:section" content="post"><meta property="article:published_time" content="2020-09-27T00:00:00+00:00"><meta property="article:modified_time" content="2021-04-07T11:48:13+08:00"><meta itemprop=name content="Mutter窗口管理器实现分析"><meta itemprop=description content="本文是我对理解Mutter运行机制以及Linux的DRM子系统的一次尝试。之前的尝试似乎由于种种原因没有进行下去，而我最近深受GNOME下各"><meta itemprop=datePublished content="2020-09-27T00:00:00+00:00"><meta itemprop=dateModified content="2021-04-07T11:48:13+08:00"><meta itemprop=wordCount content="9190"><meta itemprop=keywords content="gnome,mutter,drm,"><meta name=twitter:card content="summary"><meta name=twitter:title content="Mutter窗口管理器实现分析"><meta name=twitter:description content="本文是我对理解Mutter运行机制以及Linux的DRM子系统的一次尝试。之前的尝试似乎由于种种原因没有进行下去，而我最近深受GNOME下各"><!--[if lte IE 9]><script src=https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js></script><![endif]--><!--[if lt IE 9]><script src=https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js></script><script src=https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js></script><![endif]--></head><body><div id=mobile-navbar class=mobile-navbar><div class=mobile-header-logo><a href=/ class=logo>crab2313's blog</a></div><div class=mobile-navbar-icon><span></span><span></span><span></span></div></div><nav id=mobile-menu class="mobile-menu slideout-menu"><ul class=mobile-menu-list><a href=/><li class=mobile-menu-item>Home</li></a><a href=/post/><li class=mobile-menu-item>Archives</li></a><a href=/tags/><li class=mobile-menu-item>Tags</li></a><a href=/categories/><li class=mobile-menu-item>Categories</li></a></ul></nav><div class=container id=mobile-panel><header id=header class=header><div class=logo-wrapper><a href=/ class=logo>crab2313's blog</a></div><nav class=site-navbar><ul id=menu class=menu><li class=menu-item><a class=menu-item-link href=/>Home</a></li><li class=menu-item><a class=menu-item-link href=/post/>Archives</a></li><li class=menu-item><a class=menu-item-link href=/tags/>Tags</a></li><li class=menu-item><a class=menu-item-link href=/categories/>Categories</a></li></ul></nav></header><main id=main class=main><div class=content-wrapper><div id=content class=content><article class=post><header class=post-header><h1 class=post-title>Mutter窗口管理器实现分析</h1><div class=post-meta><span class=post-time>2020-09-27</span></div></header><div class=post-toc id=post-toc><h2 class=post-toc-title>文章目录</h2><div class=post-toc-content><nav id=TableOfContents><ul><li><ul><li><a href=#问题>问题</a></li><li><a href=#感兴趣的特性>感兴趣的特性</a></li><li><a href=#clutter>Clutter</a></li><li><a href=#mutter>Mutter</a></li><li><a href=#metadisplay>MetaDisplay</a><ul><li><a href=#meta_display_open>meta_display_open</a></li></ul></li><li><a href=#metacompositor>MetaCompositor</a><ul><li><a href=#meta_compositor_add_window>meta_compositor_add_window</a></li><li><a href=#meta_compositor_sync_stack>meta_compositor_sync_stack</a></li><li><a href=#meta_compositor_manageunmange>meta_compositor_{manage,unmange}</a></li><li><a href=#meta_compositor_queue_frame_draw>meta_compositor_queue_frame_draw</a></li></ul></li><li><a href=#metastage>MetaStage</a><ul><li><a href=#meta_stage_paint>meta_stage_paint</a></li></ul></li><li><a href=#metaoverlay>MetaOverlay</a><ul><li><a href=#光标overlay绘制>光标Overlay绘制</a></li></ul></li><li><a href=#metawindowactor>MetaWindowActor</a></li><li><a href=#metasurfaceactor>MetaSurfaceActor</a><ul><li><a href=#meta_surface_actor_update_area>meta_surface_actor_update_area</a></li><li><a href=#metashapedtexture>MetaShapedTexture</a></li><li><a href=#meta_shaped_texture_update_area>meta_shaped_texture_update_area</a></li></ul></li><li><a href=#metamonitor>MetaMonitor</a></li><li><a href=#metamonitormanager>MetaMonitorManager</a><ul><li><a href=#applymonitorsconfig>ApplyMonitorsConfig</a></li></ul></li><li><a href=#metamonitormanagerkms>MetaMonitorManagerKms</a><ul><li><a href=#layoutmode>LayoutMode</a></li><li><a href=#calculate_supported_scales>calculate_supported_scales</a></li><li><a href=#calculate_monitor_mode_scale>calculate_monitor_mode_scale</a></li></ul></li><li><a href=#metacullable>MetaCullable</a><ul><li><a href=#最初的调用入口>最初的调用入口</a></li><li><a href=#meta_background_actor_cull_out>meta_background_actor_cull_out</a></li><li><a href=#meta_surface_actor_cull_out>meta_surface_actor_cull_out</a></li><li><a href=#meta_cullable_cull_out_children>meta_cullable_cull_out_children</a></li></ul></li></ul></li></ul></nav></div></div><div class=post-content><p>本文是我对理解Mutter运行机制以及Linux的DRM子系统的一次尝试。之前的尝试似乎由于种种原因没有进行下去，而我最近深受GNOME下各种HIDPI问题的困扰，所以决定坚持下去，达到可以为GNOME开发特性的水准。在以前的尝试中，总结出比较重要的几点列举如下，做为之后的指导方向：</p><ul><li>对于GPU的功能一定要准确的划分清楚。对于Mutter使用了GPU哪部分的功能也要有清晰的认识。Mutter本质上是利用了Linux内核抽象出来的DRM接口，控制Display Controller将图输出到屏幕上。而输出的内容则由各个窗口的内容合成出来，故而被称作Compositor，合成的过程则利用了GPU的图形pipeline，但也仅仅是非常简单的利用，并不是什么复杂的3D程序。因此分析Mutter代码时，一定要重点关注窗口合成的逻辑，而非具体GPU的实现。</li><li>Mutter事实上实现了两个后端，一个被称为native，即DRM+wayland那一套，另一个为x11。X11是没有分析的必要的，后续也会淘汰，未来是Wayland的天下。</li></ul><p>由于本文中夹杂着以前遗留下来的文档，故而逻辑不是很清晰，阅读时需要顺着自己的逻辑。以前的多次尝试都是直接从Mutter入手开始阅读，但在最后都由于卡在了自己没有涉猎的知识点上，导致流产，因此本次直接从Mutter的底层依赖库入手进行学习。因此，这次的顺序应该为：</p><ul><li>Clutter。Clutter是gtk3时代的产物，本质上是因为gtk3缺乏GPU加速能力（即无法利用GPU渲染）而被gnome开发者创造出来的一套替代方案，是与gtk3平行的toolkit。因此clutter被gnome开发者拿来写compositor，本质上是因为其具备基本的3D渲染能力。</li><li>EGL。EGL是通用的OpenGL系渲染API的Context创建接口，Mutter利用其创建基本的渲染Context。</li><li>libinput。与wayland同期开发出来的用户输入处理库。</li></ul><h2 id=问题>问题</h2><p>希望本文档结束时，我可以回答以下问题：</p><ul><li>MetaWindow是如何绘制的，如何重新绘制</li><li>clutter的长宽坐标是如何传入的</li><li>整个mutter的显示架构是什么样的</li><li>HIDPI是如何实现的</li></ul><h2 id=感兴趣的特性>感兴趣的特性</h2><ul><li>void GPU实现。本质上允许无mutter运行在无GPU模式下，这使得mutter可以动态卸载唯一的GPU，让内核卸载其驱动，将设备用以GPU穿透。实现单GPU不重启进行GPU穿透。</li><li>根据EDID自动决定默认缩放比例。</li><li>Atomic Modesetting</li></ul><h2 id=clutter>Clutter</h2><p>看了一部分Clutter的文档，感觉对于Mutter来说，并不需要理解许多多余的概念。首先是ClutterActor，即一个2D元素，可以在3D空间中被变换，即移动，拉伸，旋转。而ClutterActor可以组成树型结构，即构成绘制树，child在parent之上进行绘制。ClutterStage是总的ClutterActor也是一个ClutterCroup，可以放多个ClutterActor。</p><h2 id=mutter>Mutter</h2><p>从入口<code>core/mutter.c</code>看起。首先明确一点，mutter是一个支持插件的设计，gnome-shell实际上是mutter的一个插件。gnome3的桌面环境并没有mutter进程，只有gnome-shell进程。<code>core/mutter.c</code>实际上是一个独立的可执行程序，这里我直接从这里入手，可以先避开gnome-shell的代码。</p><p>可以看到这个文件很短，除掉命令行参数处理就只剩下几行：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt>1
+<!doctype html><html lang=zh-cn>
+<head>
+<meta charset=utf-8>
+<meta http-equiv=x-ua-compatible content="IE=edge,chrome=1">
+<title>Mutter窗口管理器实现分析 - crab2313's blog</title>
+<meta name=renderer content="webkit">
+<meta name=viewport content="width=device-width,initial-scale=1,maximum-scale=1">
+<meta http-equiv=cache-control content="no-transform">
+<meta http-equiv=cache-control content="no-siteapp">
+<meta name=theme-color content="#f8f5ec">
+<meta name=msapplication-navbutton-color content="#f8f5ec">
+<meta name=apple-mobile-web-app-capable content="yes">
+<meta name=apple-mobile-web-app-status-bar-style content="#f8f5ec">
+<meta name=author content="crab2313"><meta name=description content="本文是我对理解Mutter运行机制以及Linux的DRM子系统的一次尝试。之前的尝试似乎由于种种原因没有进行下去，而我最近深受GNOME下各"><meta name=keywords content="blog,kernel">
+<meta name=generator content="Hugo 0.89.2 with theme even">
+<link rel=canonical href=/post/mutter/>
+<link rel=apple-touch-icon sizes=180x180 href=/apple-touch-icon.png>
+<link rel=icon type=image/png sizes=32x32 href=/favicon-32x32.png>
+<link rel=icon type=image/png sizes=16x16 href=/favicon-16x16.png>
+<link rel=manifest href=/manifest.json>
+<link rel=mask-icon href=/safari-pinned-tab.svg color=#5bbad5>
+<link href=/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css rel=stylesheet>
+<link rel=stylesheet href=https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin=anonymous>
+<meta property="og:title" content="Mutter窗口管理器实现分析">
+<meta property="og:description" content="本文是我对理解Mutter运行机制以及Linux的DRM子系统的一次尝试。之前的尝试似乎由于种种原因没有进行下去，而我最近深受GNOME下各">
+<meta property="og:type" content="article">
+<meta property="og:url" content="/post/mutter/"><meta property="article:section" content="post">
+<meta property="article:published_time" content="2020-09-27T00:00:00+00:00">
+<meta property="article:modified_time" content="2021-04-07T11:48:13+08:00">
+<meta itemprop=name content="Mutter窗口管理器实现分析">
+<meta itemprop=description content="本文是我对理解Mutter运行机制以及Linux的DRM子系统的一次尝试。之前的尝试似乎由于种种原因没有进行下去，而我最近深受GNOME下各"><meta itemprop=datePublished content="2020-09-27T00:00:00+00:00">
+<meta itemprop=dateModified content="2021-04-07T11:48:13+08:00">
+<meta itemprop=wordCount content="9190">
+<meta itemprop=keywords content="gnome,mutter,drm,"><meta name=twitter:card content="summary">
+<meta name=twitter:title content="Mutter窗口管理器实现分析">
+<meta name=twitter:description content="本文是我对理解Mutter运行机制以及Linux的DRM子系统的一次尝试。之前的尝试似乎由于种种原因没有进行下去，而我最近深受GNOME下各"><!--[if lte IE 9]><script src=https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js></script><![endif]--><!--[if lt IE 9]><script src=https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js></script>
+<script src=https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js></script><![endif]-->
+</head>
+<body>
+<div id=mobile-navbar class=mobile-navbar>
+<div class=mobile-header-logo>
+<a href=/ class=logo>crab2313's blog</a>
+</div>
+<div class=mobile-navbar-icon>
+<span></span>
+<span></span>
+<span></span>
+</div>
+</div>
+<nav id=mobile-menu class="mobile-menu slideout-menu">
+<ul class=mobile-menu-list>
+<a href=/>
+<li class=mobile-menu-item>Home</li>
+</a><a href=/post/>
+<li class=mobile-menu-item>Archives</li>
+</a><a href=/tags/>
+<li class=mobile-menu-item>Tags</li>
+</a><a href=/categories/>
+<li class=mobile-menu-item>Categories</li>
+</a>
+</ul>
+</nav>
+<div class=container id=mobile-panel>
+<header id=header class=header>
+<div class=logo-wrapper>
+<a href=/ class=logo>crab2313's blog</a>
+</div>
+<nav class=site-navbar>
+<ul id=menu class=menu>
+<li class=menu-item>
+<a class=menu-item-link href=/>Home</a>
+</li><li class=menu-item>
+<a class=menu-item-link href=/post/>Archives</a>
+</li><li class=menu-item>
+<a class=menu-item-link href=/tags/>Tags</a>
+</li><li class=menu-item>
+<a class=menu-item-link href=/categories/>Categories</a>
+</li>
+</ul>
+</nav>
+</header>
+<main id=main class=main>
+<div class=content-wrapper>
+<div id=content class=content>
+<article class=post>
+<header class=post-header>
+<h1 class=post-title>Mutter窗口管理器实现分析</h1>
+<div class=post-meta>
+<span class=post-time> 2020-09-27 </span>
+</div>
+</header>
+<div class=post-toc id=post-toc>
+<h2 class=post-toc-title>文章目录</h2>
+<div class=post-toc-content>
+<nav id=TableOfContents>
+<ul>
+<li>
+<ul>
+<li><a href=#问题>问题</a></li>
+<li><a href=#感兴趣的特性>感兴趣的特性</a></li>
+<li><a href=#clutter>Clutter</a></li>
+<li><a href=#mutter>Mutter</a></li>
+<li><a href=#metadisplay>MetaDisplay</a>
+<ul>
+<li><a href=#meta_display_open>meta_display_open</a></li>
+</ul>
+</li>
+<li><a href=#metacompositor>MetaCompositor</a>
+<ul>
+<li><a href=#meta_compositor_add_window>meta_compositor_add_window</a></li>
+<li><a href=#meta_compositor_sync_stack>meta_compositor_sync_stack</a></li>
+<li><a href=#meta_compositor_manageunmange>meta_compositor_{manage,unmange}</a></li>
+<li><a href=#meta_compositor_queue_frame_draw>meta_compositor_queue_frame_draw</a></li>
+</ul>
+</li>
+<li><a href=#metastage>MetaStage</a>
+<ul>
+<li><a href=#meta_stage_paint>meta_stage_paint</a></li>
+</ul>
+</li>
+<li><a href=#metaoverlay>MetaOverlay</a>
+<ul>
+<li><a href=#光标overlay绘制>光标Overlay绘制</a></li>
+</ul>
+</li>
+<li><a href=#metawindowactor>MetaWindowActor</a></li>
+<li><a href=#metasurfaceactor>MetaSurfaceActor</a>
+<ul>
+<li><a href=#meta_surface_actor_update_area>meta_surface_actor_update_area</a></li>
+<li><a href=#metashapedtexture>MetaShapedTexture</a></li>
+<li><a href=#meta_shaped_texture_update_area>meta_shaped_texture_update_area</a></li>
+</ul>
+</li>
+<li><a href=#metamonitor>MetaMonitor</a></li>
+<li><a href=#metamonitormanager>MetaMonitorManager</a>
+<ul>
+<li><a href=#applymonitorsconfig>ApplyMonitorsConfig</a></li>
+</ul>
+</li>
+<li><a href=#metamonitormanagerkms>MetaMonitorManagerKms</a>
+<ul>
+<li><a href=#layoutmode>LayoutMode</a></li>
+<li><a href=#calculate_supported_scales>calculate_supported_scales</a></li>
+<li><a href=#calculate_monitor_mode_scale>calculate_monitor_mode_scale</a></li>
+</ul>
+</li>
+<li><a href=#metacullable>MetaCullable</a>
+<ul>
+<li><a href=#最初的调用入口>最初的调用入口</a></li>
+<li><a href=#meta_background_actor_cull_out>meta_background_actor_cull_out</a></li>
+<li><a href=#meta_surface_actor_cull_out>meta_surface_actor_cull_out</a></li>
+<li><a href=#meta_cullable_cull_out_children>meta_cullable_cull_out_children</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</nav>
+</div>
+</div>
+<div class=post-content>
+<p>本文是我对理解Mutter运行机制以及Linux的DRM子系统的一次尝试。之前的尝试似乎由于种种原因没有进行下去，而我最近深受GNOME下各种HIDPI问题的困扰，所以决定坚持下去，达到可以为GNOME开发特性的水准。在以前的尝试中，总结出比较重要的几点列举如下，做为之后的指导方向：</p>
+<ul>
+<li>对于GPU的功能一定要准确的划分清楚。对于Mutter使用了GPU哪部分的功能也要有清晰的认识。Mutter本质上是利用了Linux内核抽象出来的DRM接口，控制Display Controller将图输出到屏幕上。而输出的内容则由各个窗口的内容合成出来，故而被称作Compositor，合成的过程则利用了GPU的图形pipeline，但也仅仅是非常简单的利用，并不是什么复杂的3D程序。因此分析Mutter代码时，一定要重点关注窗口合成的逻辑，而非具体GPU的实现。</li>
+<li>Mutter事实上实现了两个后端，一个被称为native，即DRM+wayland那一套，另一个为x11。X11是没有分析的必要的，后续也会淘汰，未来是Wayland的天下。</li>
+</ul>
+<p>由于本文中夹杂着以前遗留下来的文档，故而逻辑不是很清晰，阅读时需要顺着自己的逻辑。以前的多次尝试都是直接从Mutter入手开始阅读，但在最后都由于卡在了自己没有涉猎的知识点上，导致流产，因此本次直接从Mutter的底层依赖库入手进行学习。因此，这次的顺序应该为：</p>
+<ul>
+<li>Clutter。Clutter是gtk3时代的产物，本质上是因为gtk3缺乏GPU加速能力（即无法利用GPU渲染）而被gnome开发者创造出来的一套替代方案，是与gtk3平行的toolkit。因此clutter被gnome开发者拿来写compositor，本质上是因为其具备基本的3D渲染能力。</li>
+<li>EGL。EGL是通用的OpenGL系渲染API的Context创建接口，Mutter利用其创建基本的渲染Context。</li>
+<li>libinput。与wayland同期开发出来的用户输入处理库。</li>
+</ul>
+<h2 id=问题>问题</h2>
+<p>希望本文档结束时，我可以回答以下问题：</p>
+<ul>
+<li>MetaWindow是如何绘制的，如何重新绘制</li>
+<li>clutter的长宽坐标是如何传入的</li>
+<li>整个mutter的显示架构是什么样的</li>
+<li>HIDPI是如何实现的</li>
+</ul>
+<h2 id=感兴趣的特性>感兴趣的特性</h2>
+<ul>
+<li>void GPU实现。本质上允许无mutter运行在无GPU模式下，这使得mutter可以动态卸载唯一的GPU，让内核卸载其驱动，将设备用以GPU穿透。实现单GPU不重启进行GPU穿透。</li>
+<li>根据EDID自动决定默认缩放比例。</li>
+<li>Atomic Modesetting</li>
+</ul>
+<h2 id=clutter>Clutter</h2>
+<p>看了一部分Clutter的文档，感觉对于Mutter来说，并不需要理解许多多余的概念。首先是ClutterActor，即一个2D元素，可以在3D空间中被变换，即移动，拉伸，旋转。而ClutterActor可以组成树型结构，即构成绘制树，child在parent之上进行绘制。ClutterStage是总的ClutterActor也是一个ClutterCroup，可以放多个ClutterActor。</p>
+<h2 id=mutter>Mutter</h2>
+<p>从入口<code>core/mutter.c</code>看起。首先明确一点，mutter是一个支持插件的设计，gnome-shell实际上是mutter的一个插件。gnome3的桌面环境并没有mutter进程，只有gnome-shell进程。<code>core/mutter.c</code>实际上是一个独立的可执行程序，这里我直接从这里入手，可以先避开gnome-shell的代码。</p>
+<p>可以看到这个文件很短，除掉命令行参数处理就只剩下几行：</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt>1
 </span><span class=lnt>2
 </span><span class=lnt>3
 </span><span class=lnt>4
 </span><span class=lnt>5
 </span><span class=lnt>6
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c>  <span class=k>if</span> <span class=p>(</span><span class=n>plugin</span><span class=p>)</span>
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c>  <span class=k>if</span> <span class=p>(</span><span class=n>plugin</span><span class=p>)</span>
     <span class=n>meta_plugin_manager_load</span> <span class=p>(</span><span class=n>plugin</span><span class=p>);</span>
 
   <span class=n>meta_init</span> <span class=p>();</span>
   <span class=n>meta_register_with_session</span> <span class=p>();</span>
   <span class=k>return</span> <span class=nf>meta_run</span> <span class=p>();</span>
-</code></pre></td></tr></table></div></div><p>其中plugin默认为libdefault，这里先不理会。所以入手点为<code>meta_init</code>函数，这个函数几乎是所有组件初始化的入口，目前只需要知道它初始化backend和事件循环。</p><p>来看<code>meta_run</code>，可以看到mutter是一个事件驱动的软件，其核心操作即为初始化一个事件循环，然后进行事件循环直至退出。</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt>1
+</code></pre></td></tr></table>
+</div>
+</div><p>其中plugin默认为libdefault，这里先不理会。所以入手点为<code>meta_init</code>函数，这个函数几乎是所有组件初始化的入口，目前只需要知道它初始化backend和事件循环。</p>
+<p>来看<code>meta_run</code>，可以看到mutter是一个事件驱动的软件，其核心操作即为初始化一个事件循环，然后进行事件循环直至退出。</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt>1
 </span><span class=lnt>2
 </span><span class=lnt>3
 </span><span class=lnt>4
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c>  <span class=k>if</span> <span class=p>(</span><span class=o>!</span><span class=n>meta_display_open</span> <span class=p>())</span>
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c>  <span class=k>if</span> <span class=p>(</span><span class=o>!</span><span class=n>meta_display_open</span> <span class=p>())</span>
     <span class=n>meta_exit</span> <span class=p>(</span><span class=n>META_EXIT_ERROR</span><span class=p>);</span>
 
   <span class=n>g_main_loop_run</span> <span class=p>(</span><span class=n>meta_main_loop</span><span class=p>);</span>
-</code></pre></td></tr></table></div></div><p>至此，我们进入了最主要的入口<code>meta_display_open</code>函数。该函数目的是初始化一个<code>MetaDisplay</code>，该对象是mutter最核心的对象，表示整个mutter管理的显示，注意mutter支持多屏幕（Screen）。作为一个GObject，MetaDisplay的<code>_init</code>函数里是空的，也就是说我们只需要关注<code>meta_display_open</code>。</p><h2 id=metadisplay>MetaDisplay</h2><p><code>MetaDisplay</code>原先是对XDisplay的抽象，从<code>Wayland</code>支持后被赋予了更加抽象的意义。<code>MetaDisplay</code>表示整个<code>Mutter</code>管理的显示会话。我们从其创建函数<code>meta_display_opne</code>开始分析。</p><h3 id=meta_display_open>meta_display_open</h3><p>函数首先获取<code>MetaBackend</code>，该对象是单例对象，无论是哪里设置的，我们只考虑<code>Native</code>后端，而不考虑<code>X11</code>。函数首先通过<code>g_object_new</code>创建一个<code>MetaDisplay</code>然后对其进行初始化。<code>MetaDisplay</code>中记录的大量的配置，用以决定其行为，而默认的配置我们就不进行进一步分析了。</p><p>TODO</p><h2 id=metacompositor>MetaCompositor</h2><p>这是一个抽象类，我们只关心其<code>MetaComositorWayland</code>子类。从名字上看来这个类是Mutter对其Compositor功能的抽象，虽然Wayland下并没有独立的Compositor组件。其中MetaCompositor管理的窗口实质上都是<code>MetaWindowActor</code>，这里的<code>Actor</code>实际上就是<code>ClutterActor</code>一个很直接的概念上的迁移。<code>MetaWindowActor</code>的结构如下：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt>1
+</code></pre></td></tr></table>
+</div>
+</div><p>至此，我们进入了最主要的入口<code>meta_display_open</code>函数。该函数目的是初始化一个<code>MetaDisplay</code>，该对象是mutter最核心的对象，表示整个mutter管理的显示，注意mutter支持多屏幕（Screen）。作为一个GObject，MetaDisplay的<code>_init</code>函数里是空的，也就是说我们只需要关注<code>meta_display_open</code>。</p>
+<h2 id=metadisplay>MetaDisplay</h2>
+<p><code>MetaDisplay</code>原先是对XDisplay的抽象，从<code>Wayland</code>支持后被赋予了更加抽象的意义。<code>MetaDisplay</code>表示整个<code>Mutter</code>管理的显示会话。我们从其创建函数<code>meta_display_opne</code>开始分析。</p>
+<h3 id=meta_display_open>meta_display_open</h3>
+<p>函数首先获取<code>MetaBackend</code>，该对象是单例对象，无论是哪里设置的，我们只考虑<code>Native</code>后端，而不考虑<code>X11</code>。函数首先通过<code>g_object_new</code>创建一个<code>MetaDisplay</code>然后对其进行初始化。<code>MetaDisplay</code>中记录的大量的配置，用以决定其行为，而默认的配置我们就不进行进一步分析了。</p>
+<p>TODO</p>
+<h2 id=metacompositor>MetaCompositor</h2>
+<p>这是一个抽象类，我们只关心其<code>MetaComositorWayland</code>子类。从名字上看来这个类是Mutter对其Compositor功能的抽象，虽然Wayland下并没有独立的Compositor组件。其中MetaCompositor管理的窗口实质上都是<code>MetaWindowActor</code>，这里的<code>Actor</code>实际上就是<code>ClutterActor</code>一个很直接的概念上的迁移。<code>MetaWindowActor</code>的结构如下：</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt>1
 </span><span class=lnt>2
 </span><span class=lnt>3
 </span><span class=lnt>4
@@ -27,7 +242,9 @@
 </span><span class=lnt>7
 </span><span class=lnt>8
 </span><span class=lnt>9
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-fallback data-lang=fallback> MetaWindowActor
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-fallback data-lang=fallback> MetaWindowActor
   ↳ MetaSurfaceActor (surface)
      ↳ MetaShapedTexture
      ↳ MetaSurfaceActor (subsurface)
@@ -36,15 +253,29 @@
            ↳ MetaShapedTexture
      ↳ MetaSurfaceActor (subsurface)
         ↳ MetaShapedTextur
-</code></pre></td></tr></table></div></div><p>注意Wayland的<code>Sub Surface</code>特性，这里的<code>MetaSurfaceActor</code>抽象了这一特性。这里的<code>MetaShapedTexture</code>实质上是Surface的内容，Mutter中将Surface的内容与其形状区分了开来。所以<code>Compositor</code>的任务实质上就是管理这样的一个树形结构，并将其合成，并渲染成一张位图。</p><h3 id=meta_compositor_add_window>meta_compositor_add_window</h3><p>该函数如其名字所述，就是将一个<code>MetaWindow</code>加入到<code>Compositor</code>的管理中来。函数首先根据传入的<code>MetaWindow</code>的类型将其分类为X11或者Wayland，后续根据其类型创建<code>MetaWindowActorX11</code>或者<code>MetaWindowActorWayland</code>。</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt>1
+</code></pre></td></tr></table>
+</div>
+</div><p>注意Wayland的<code>Sub Surface</code>特性，这里的<code>MetaSurfaceActor</code>抽象了这一特性。这里的<code>MetaShapedTexture</code>实质上是Surface的内容，Mutter中将Surface的内容与其形状区分了开来。所以<code>Compositor</code>的任务实质上就是管理这样的一个树形结构，并将其合成，并渲染成一张位图。</p>
+<h3 id=meta_compositor_add_window>meta_compositor_add_window</h3>
+<p>该函数如其名字所述，就是将一个<code>MetaWindow</code>加入到<code>Compositor</code>的管理中来。函数首先根据传入的<code>MetaWindow</code>的类型将其分类为X11或者Wayland，后续根据其类型创建<code>MetaWindowActorX11</code>或者<code>MetaWindowActorWayland</code>。</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt>1
 </span><span class=lnt>2
 </span><span class=lnt>3
 </span><span class=lnt>4
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c>  <span class=n>window_actor</span> <span class=o>=</span> <span class=n>g_object_new</span> <span class=p>(</span><span class=n>window_actor_type</span><span class=p>,</span>
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c>  <span class=n>window_actor</span> <span class=o>=</span> <span class=n>g_object_new</span> <span class=p>(</span><span class=n>window_actor_type</span><span class=p>,</span>
                                <span class=s>&#34;meta-window&#34;</span><span class=p>,</span> <span class=n>window</span><span class=p>,</span>
                                <span class=s>&#34;show-on-set-parent&#34;</span><span class=p>,</span> <span class=n>FALSE</span><span class=p>,</span>
                                <span class=nb>NULL</span><span class=p>);</span>
-</code></pre></td></tr></table></div></div><p>作为一个<code>stack-based</code>的窗口管理器，Mutter中存在layer的概念，这很好理解，想想我们常见的置顶窗口功能，这就是将窗口设置到<code>top layer</code>的行为。Mutter中的layer定义如下：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
+</code></pre></td></tr></table>
+</div>
+</div><p>作为一个<code>stack-based</code>的窗口管理器，Mutter中存在layer的概念，这很好理解，想想我们常见的置顶窗口功能，这就是将窗口设置到<code>top layer</code>的行为。Mutter中的layer定义如下：</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt> 1
 </span><span class=lnt> 2
 </span><span class=lnt> 3
 </span><span class=lnt> 4
@@ -57,7 +288,9 @@
 </span><span class=lnt>11
 </span><span class=lnt>12
 </span><span class=lnt>13
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c><span class=cm>/**
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=cm>/**
 </span><span class=cm> * MetaStackLayer:
 </span><span class=cm> * @META_LAYER_DESKTOP: Desktop layer
 </span><span class=cm> * @META_LAYER_BOTTOM: Bottom layer
@@ -70,61 +303,118 @@
 </span><span class=cm> * Layers a window can be in.
 </span><span class=cm> * These MUST be in the order of stacking.
 </span><span class=cm> */</span>
-</code></pre></td></tr></table></div></div><p>但是<code>Compositor</code>只会将<code>META_LAYER_OVERRIDE_REDIRECT</code>进行特殊对待，为其分配一个单独的<code>Group</code>。</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt>1
+</code></pre></td></tr></table>
+</div>
+</div><p>但是<code>Compositor</code>只会将<code>META_LAYER_OVERRIDE_REDIRECT</code>进行特殊对待，为其分配一个单独的<code>Group</code>。</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt>1
 </span><span class=lnt>2
 </span><span class=lnt>3
 </span><span class=lnt>4
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c>  <span class=k>if</span> <span class=p>(</span><span class=n>window</span><span class=o>-&gt;</span><span class=n>layer</span> <span class=o>==</span> <span class=n>META_LAYER_OVERRIDE_REDIRECT</span><span class=p>)</span>
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c>  <span class=k>if</span> <span class=p>(</span><span class=n>window</span><span class=o>-&gt;</span><span class=n>layer</span> <span class=o>==</span> <span class=n>META_LAYER_OVERRIDE_REDIRECT</span><span class=p>)</span>
     <span class=n>window_group</span> <span class=o>=</span> <span class=n>priv</span><span class=o>-&gt;</span><span class=n>top_window_group</span><span class=p>;</span>
   <span class=k>else</span>
     <span class=n>window_group</span> <span class=o>=</span> <span class=n>priv</span><span class=o>-&gt;</span><span class=n>window_group</span><span class=p>;</span>
-</code></pre></td></tr></table></div></div><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt>1
+</code></pre></td></tr></table>
+</div>
+</div><div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt>1
 </span><span class=lnt>2
 </span><span class=lnt>3
 </span><span class=lnt>4
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c>  <span class=c1>// struct _MetaCompositorPrivate
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c>  <span class=c1>// struct _MetaCompositorPrivate
 </span><span class=c1></span>  <span class=n>ClutterActor</span> <span class=o>*</span><span class=n>window_group</span><span class=p>;</span>
   <span class=n>ClutterActor</span> <span class=o>*</span><span class=n>top_window_group</span><span class=p>;</span>
   <span class=n>ClutterActor</span> <span class=o>*</span><span class=n>feedback_group</span><span class=p>;</span>
-</code></pre></td></tr></table></div></div><p>注意这里的<code>Group</code>是<code>Clutter</code>中的<code>ClutterGroup</code>概念，本质上就是可以放<code>ClutterActor</code>的容器，最常见的就是<code>ClutterStage</code>。随后所有创建的<code>MetaWindowActor</code>会被放到<code>Compositor</code>内维护的<code>windows</code>列表中，最后调用<code>sync_actor_stacking</code>。<code>sync_actor_stacking</code>函数本质上是维护真个<code>Compositor</code>的stack窗口管理的性质，后续在分析<code>meta_compositor_sync_stack</code>函数时仔细分析。</p><h3 id=meta_compositor_sync_stack>meta_compositor_sync_stack</h3><p>现在来看<code>sync_actor_stacking</code>函数。本质上，<code>windows</code>是一个链表，保存着所有的<code>MetaWindowsActor</code>，也就是所有的窗口。我们知道<code>Stack-based</code>的窗口管理器有着深度这一概念，也就是窗口在Stack中的位置，而<code>windows</code>链表本质上就是反映了这个位置信息，<code>windows</code>的第一个元素就是Stack中最底下的窗口。而事实上合成整个窗口要利用<code>Clutter</code>实现，因此每个窗口对应一个<code>ClutterActor</code>，同时背景也要一同绘制，因此<code>MetaBackGroundActor</code>也算一个<code>ClutterActor</code>。这些<code>ClutterActor</code>都放置在<code>window_group</code>这个<code>ClutterGroup</code>中。<code>sync_actor_stacking</code>函数的功能实质上就是同步<code>windows</code>链表中窗口的深浅顺序与<code>window_group</code>中<code>ClutterActor</code>的深浅顺序。函数首先检测<code>windows</code>和<code>window_group</code>的顺序是否同步，一旦不同步，则调用<code>clutter_actor_set_child_below_sibling</code>一个一个地重建整个<code>window_group</code>中<code>ClutterActor</code>的顺序。</p><h3 id=meta_compositor_manageunmange>meta_compositor_{manage,unmange}</h3><p><code>manage</code>函数的目的是让对应的Display被<code>Compositor</code>接管，内部调用了<code>meta_compositor_do_manage</code>函数。函数首先连接了<code>ClutterStage</code>上的<code>presented</code>信号：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt>1
+</code></pre></td></tr></table>
+</div>
+</div><p>注意这里的<code>Group</code>是<code>Clutter</code>中的<code>ClutterGroup</code>概念，本质上就是可以放<code>ClutterActor</code>的容器，最常见的就是<code>ClutterStage</code>。随后所有创建的<code>MetaWindowActor</code>会被放到<code>Compositor</code>内维护的<code>windows</code>列表中，最后调用<code>sync_actor_stacking</code>。<code>sync_actor_stacking</code>函数本质上是维护真个<code>Compositor</code>的stack窗口管理的性质，后续在分析<code>meta_compositor_sync_stack</code>函数时仔细分析。</p>
+<h3 id=meta_compositor_sync_stack>meta_compositor_sync_stack</h3>
+<p>现在来看<code>sync_actor_stacking</code>函数。本质上，<code>windows</code>是一个链表，保存着所有的<code>MetaWindowsActor</code>，也就是所有的窗口。我们知道<code>Stack-based</code>的窗口管理器有着深度这一概念，也就是窗口在Stack中的位置，而<code>windows</code>链表本质上就是反映了这个位置信息，<code>windows</code>的第一个元素就是Stack中最底下的窗口。而事实上合成整个窗口要利用<code>Clutter</code>实现，因此每个窗口对应一个<code>ClutterActor</code>，同时背景也要一同绘制，因此<code>MetaBackGroundActor</code>也算一个<code>ClutterActor</code>。这些<code>ClutterActor</code>都放置在<code>window_group</code>这个<code>ClutterGroup</code>中。<code>sync_actor_stacking</code>函数的功能实质上就是同步<code>windows</code>链表中窗口的深浅顺序与<code>window_group</code>中<code>ClutterActor</code>的深浅顺序。函数首先检测<code>windows</code>和<code>window_group</code>的顺序是否同步，一旦不同步，则调用<code>clutter_actor_set_child_below_sibling</code>一个一个地重建整个<code>window_group</code>中<code>ClutterActor</code>的顺序。</p>
+<h3 id=meta_compositor_manageunmange>meta_compositor_{manage,unmange}</h3>
+<p><code>manage</code>函数的目的是让对应的Display被<code>Compositor</code>接管，内部调用了<code>meta_compositor_do_manage</code>函数。函数首先连接了<code>ClutterStage</code>上的<code>presented</code>信号：</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt>1
 </span><span class=lnt>2
 </span><span class=lnt>3
 </span><span class=lnt>4
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c>  <span class=n>priv</span><span class=o>-&gt;</span><span class=n>stage_presented_id</span> <span class=o>=</span>
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c>  <span class=n>priv</span><span class=o>-&gt;</span><span class=n>stage_presented_id</span> <span class=o>=</span>
     <span class=n>g_signal_connect</span> <span class=p>(</span><span class=n>stage</span><span class=p>,</span> <span class=s>&#34;presented&#34;</span><span class=p>,</span>
                       <span class=n>G_CALLBACK</span> <span class=p>(</span><span class=n>on_presented</span><span class=p>),</span>
                       <span class=n>compositor</span><span class=p>);</span>
-</code></pre></td></tr></table></div></div><p>随后创建三个<code>MetaWindowGroup</code>，并将其加入到<code>ClutterStage</code>中：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt>1
+</code></pre></td></tr></table>
+</div>
+</div><p>随后创建三个<code>MetaWindowGroup</code>，并将其加入到<code>ClutterStage</code>中：</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt>1
 </span><span class=lnt>2
 </span><span class=lnt>3
 </span><span class=lnt>4
 </span><span class=lnt>5
 </span><span class=lnt>6
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c>  <span class=n>priv</span><span class=o>-&gt;</span><span class=n>window_group</span> <span class=o>=</span> <span class=n>meta_window_group_new</span> <span class=p>(</span><span class=n>display</span><span class=p>);</span>
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c>  <span class=n>priv</span><span class=o>-&gt;</span><span class=n>window_group</span> <span class=o>=</span> <span class=n>meta_window_group_new</span> <span class=p>(</span><span class=n>display</span><span class=p>);</span>
   <span class=n>priv</span><span class=o>-&gt;</span><span class=n>top_window_group</span> <span class=o>=</span> <span class=n>meta_window_group_new</span> <span class=p>(</span><span class=n>display</span><span class=p>);</span>
   <span class=n>priv</span><span class=o>-&gt;</span><span class=n>feedback_group</span> <span class=o>=</span> <span class=n>meta_window_group_new</span> <span class=p>(</span><span class=n>display</span><span class=p>);</span>
   <span class=n>clutter_actor_add_child</span> <span class=p>(</span><span class=n>stage</span><span class=p>,</span> <span class=n>priv</span><span class=o>-&gt;</span><span class=n>window_group</span><span class=p>);</span>
   <span class=n>clutter_actor_add_child</span> <span class=p>(</span><span class=n>stage</span><span class=p>,</span> <span class=n>priv</span><span class=o>-&gt;</span><span class=n>top_window_group</span><span class=p>);</span>
   <span class=n>clutter_actor_add_child</span> <span class=p>(</span><span class=n>stage</span><span class=p>,</span> <span class=n>priv</span><span class=o>-&gt;</span><span class=n>feedback_group</span><span class=p>);</span>
-</code></pre></td></tr></table></div></div><p>最后调用子类实现的<code>manage</code>虚函数。<code>MetaCompositoative</code>没有实现这个虚函数。</p><h3 id=meta_compositor_queue_frame_draw>meta_compositor_queue_frame_draw</h3><p>函数的直接参数是一个<code>MetaWindow</code>，但是前面提到了一个<code>MetaWindow</code>是直接与其对应的<code>MetaWindowActor</code>绑定的。因此函数获取对应的<code>MetaWindowActor</code>后直接调用<code>meta_window_actor_queue_frame_draw</code>。对应于<code>MetaWindowActorWayland</code>那就是什么都不做，也就是说这个函数在<code>Wayland</code>窗口上是空的。</p><h2 id=metastage>MetaStage</h2><p><code>MetaStage</code>实质上是<code>ClutterStage</code>的子类。本质上代表了多组需要显示在屏幕上的Actor。<code>meta_state_new</code>负责创建一个<code>MetaStage</code>，创建时，监听<code>MetaMonitorManager</code>上的<code>power-save-mode-changed</code>信号。除此之外，实现了<code>ClutterState</code>类提供的多个虚函数：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt>1
+</code></pre></td></tr></table>
+</div>
+</div><p>最后调用子类实现的<code>manage</code>虚函数。<code>MetaCompositoative</code>没有实现这个虚函数。</p>
+<h3 id=meta_compositor_queue_frame_draw>meta_compositor_queue_frame_draw</h3>
+<p>函数的直接参数是一个<code>MetaWindow</code>，但是前面提到了一个<code>MetaWindow</code>是直接与其对应的<code>MetaWindowActor</code>绑定的。因此函数获取对应的<code>MetaWindowActor</code>后直接调用<code>meta_window_actor_queue_frame_draw</code>。对应于<code>MetaWindowActorWayland</code>那就是什么都不做，也就是说这个函数在<code>Wayland</code>窗口上是空的。</p>
+<h2 id=metastage>MetaStage</h2>
+<p><code>MetaStage</code>实质上是<code>ClutterStage</code>的子类。本质上代表了多组需要显示在屏幕上的Actor。<code>meta_state_new</code>负责创建一个<code>MetaStage</code>，创建时，监听<code>MetaMonitorManager</code>上的<code>power-save-mode-changed</code>信号。除此之外，实现了<code>ClutterState</code>类提供的多个虚函数：</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt>1
 </span><span class=lnt>2
 </span><span class=lnt>3
 </span><span class=lnt>4
 </span><span class=lnt>5
 </span><span class=lnt>6
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c>  <span class=n>actor_class</span><span class=o>-&gt;</span><span class=n>paint</span> <span class=o>=</span> <span class=n>meta_stage_paint</span><span class=p>;</span>
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c>  <span class=n>actor_class</span><span class=o>-&gt;</span><span class=n>paint</span> <span class=o>=</span> <span class=n>meta_stage_paint</span><span class=p>;</span>
 
   <span class=n>stage_class</span><span class=o>-&gt;</span><span class=n>activate</span> <span class=o>=</span> <span class=n>meta_stage_activate</span><span class=p>;</span>
   <span class=n>stage_class</span><span class=o>-&gt;</span><span class=n>deactivate</span> <span class=o>=</span> <span class=n>meta_stage_deactivate</span><span class=p>;</span>
   <span class=n>stage_class</span><span class=o>-&gt;</span><span class=n>before_paint</span> <span class=o>=</span> <span class=n>meta_stage_before_paint</span><span class=p>;</span>
   <span class=n>stage_class</span><span class=o>-&gt;</span><span class=n>paint_view</span> <span class=o>=</span> <span class=n>meta_stage_paint_view</span>
-</code></pre></td></tr></table></div></div><h3 id=meta_stage_paint>meta_stage_paint</h3><p><code>MetaStage</code>作为<code>ClutterActor</code>的子类，其<code>paint</code>虚函数是被重写过的，即<code>meta_stage_paint</code>函数。这个函数实质上是给<code>MetaStage</code>的绘制操作后面添加了信号处理与鼠标绘制。可以看到每当<code>paint</code>回调函数调用完毕之后，就会触发<code>MetaStage</code>上的<code>ACTORS_PAINTED</code>信号，然后检查<code>paint_contexts</code>中的标志位，如果发现没有<code>NO_CURSOR</code>则会重新绘制所有相关联的<code>MetaOverlay</code>。</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt>1
+</code></pre></td></tr></table>
+</div>
+</div><h3 id=meta_stage_paint>meta_stage_paint</h3>
+<p><code>MetaStage</code>作为<code>ClutterActor</code>的子类，其<code>paint</code>虚函数是被重写过的，即<code>meta_stage_paint</code>函数。这个函数实质上是给<code>MetaStage</code>的绘制操作后面添加了信号处理与鼠标绘制。可以看到每当<code>paint</code>回调函数调用完毕之后，就会触发<code>MetaStage</code>上的<code>ACTORS_PAINTED</code>信号，然后检查<code>paint_contexts</code>中的标志位，如果发现没有<code>NO_CURSOR</code>则会重新绘制所有相关联的<code>MetaOverlay</code>。</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt>1
 </span><span class=lnt>2
 </span><span class=lnt>3
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c>  <span class=k>if</span> <span class=p>(</span><span class=o>!</span><span class=p>(</span><span class=n>clutter_paint_context_get_paint_flags</span> <span class=p>(</span><span class=n>paint_context</span><span class=p>)</span> <span class=o>&amp;</span>
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c>  <span class=k>if</span> <span class=p>(</span><span class=o>!</span><span class=p>(</span><span class=n>clutter_paint_context_get_paint_flags</span> <span class=p>(</span><span class=n>paint_context</span><span class=p>)</span> <span class=o>&amp;</span>
         <span class=n>CLUTTER_PAINT_FLAG_NO_CURSORS</span><span class=p>))</span>
     <span class=n>g_list_foreach</span> <span class=p>(</span><span class=n>stage</span><span class=o>-&gt;</span><span class=n>overlays</span><span class=p>,</span> <span class=p>(</span><span class=n>GFunc</span><span class=p>)</span> <span class=n>meta_overlay_paint</span><span class=p>,</span> <span class=n>paint_context</span><span class=p>);</span>
-</code></pre></td></tr></table></div></div><p>注意这里默认所有<code>MetaOverlay</code>都表示鼠标了。</p><h2 id=metaoverlay>MetaOverlay</h2><p><code>MetaOverlay</code>从概念上讲应该是一个<code>Overlay</code>区域，这个名词一般是指一个plane上的叠加层。<code>MetaOverlay</code>与一个<code>MetaStage</code>相关联，表示这个<code>MetaStage</code>显示区域上的一个叠加层，其定义如下：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
+</code></pre></td></tr></table>
+</div>
+</div><p>注意这里默认所有<code>MetaOverlay</code>都表示鼠标了。</p>
+<h2 id=metaoverlay>MetaOverlay</h2>
+<p><code>MetaOverlay</code>从概念上讲应该是一个<code>Overlay</code>区域，这个名词一般是指一个plane上的叠加层。<code>MetaOverlay</code>与一个<code>MetaStage</code>相关联，表示这个<code>MetaStage</code>显示区域上的一个叠加层，其定义如下：</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt> 1
 </span><span class=lnt> 2
 </span><span class=lnt> 3
 </span><span class=lnt> 4
@@ -137,7 +427,9 @@
 </span><span class=lnt>11
 </span><span class=lnt>12
 </span><span class=lnt>13
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c><span class=k>struct</span> <span class=n>_MetaOverlay</span>
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=k>struct</span> <span class=n>_MetaOverlay</span>
 <span class=p>{</span>
   <span class=n>MetaStage</span> <span class=o>*</span><span class=n>stage</span><span class=p>;</span>
 
@@ -150,7 +442,14 @@
   <span class=n>graphene_rect_t</span> <span class=n>previous_rect</span><span class=p>;</span>
   <span class=n>gboolean</span> <span class=n>previous_is_valid</span><span class=p>;</span>
 <span class=p>};</span>
-</code></pre></td></tr></table></div></div><p>各个字段的意思都比较直观，用户可以通过<code>meta_overlay_set</code>设置填充这个Overlay使用的材质，并设置其显示位置。<code>meta_overlay_paint</code>函数用于绘制<code>Overlay</code>到<code>MetaStage</code>上来。</p><h3 id=光标overlay绘制>光标Overlay绘制</h3><p>熟悉DRM架构的人一定知道DRM提供了三种plane，其中一种就是<code>Cursor Plane</code>，用于支持硬件光标。这个功能本质上是实现了一个额外的图层绘制光标。<code>Mutter</code>中将其抽象为一个Overlay，可以看到几个用于操作这个Overlay的接口：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt>1
+</code></pre></td></tr></table>
+</div>
+</div><p>各个字段的意思都比较直观，用户可以通过<code>meta_overlay_set</code>设置填充这个Overlay使用的材质，并设置其显示位置。<code>meta_overlay_paint</code>函数用于绘制<code>Overlay</code>到<code>MetaStage</code>上来。</p>
+<h3 id=光标overlay绘制>光标Overlay绘制</h3>
+<p>熟悉DRM架构的人一定知道DRM提供了三种plane，其中一种就是<code>Cursor Plane</code>，用于支持硬件光标。这个功能本质上是实现了一个额外的图层绘制光标。<code>Mutter</code>中将其抽象为一个Overlay，可以看到几个用于操作这个Overlay的接口：</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt>1
 </span><span class=lnt>2
 </span><span class=lnt>3
 </span><span class=lnt>4
@@ -158,7 +457,9 @@
 </span><span class=lnt>6
 </span><span class=lnt>7
 </span><span class=lnt>8
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c><span class=n>MetaOverlay</span>      <span class=o>*</span><span class=nf>meta_stage_create_cursor_overlay</span>   <span class=p>(</span><span class=n>MetaStage</span>   <span class=o>*</span><span class=n>stage</span><span class=p>);</span>
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=n>MetaOverlay</span>      <span class=o>*</span><span class=nf>meta_stage_create_cursor_overlay</span>   <span class=p>(</span><span class=n>MetaStage</span>   <span class=o>*</span><span class=n>stage</span><span class=p>);</span>
 <span class=kt>void</span>              <span class=nf>meta_stage_remove_cursor_overlay</span>   <span class=p>(</span><span class=n>MetaStage</span>   <span class=o>*</span><span class=n>stage</span><span class=p>,</span>
 						      <span class=n>MetaOverlay</span> <span class=o>*</span><span class=n>overlay</span><span class=p>);</span>
 
@@ -166,7 +467,16 @@
                                                       <span class=n>MetaOverlay</span>     <span class=o>*</span><span class=n>overlay</span><span class=p>,</span>
                                                       <span class=n>CoglTexture</span>     <span class=o>*</span><span class=n>texture</span><span class=p>,</span>
                                                       <span class=n>graphene_rect_t</span> <span class=o>*</span><span class=n>rect</span><span class=p>)</span>
-</code></pre></td></tr></table></div></div><h2 id=metawindowactor>MetaWindowActor</h2><p><code>MetaWindowActor</code>是<code>ClutterActor</code>的子类，其基本目的是将一个<code>MetaWindow</code>与<code>ClutterActor</code>绑定起来，如前面所述。这里只分析其对应<code>Wayland</code>的子类<code>MetaWindowActorWayland</code>。</p><h2 id=metasurfaceactor>MetaSurfaceActor</h2><p><code>MetaSurfaceActor</code>也是<code>ClutterActor</code>的子类，其目的是表示一个<code>surface</code>，类似于<code>Wayland</code>的<code>subsurface</code>的概念，是一个嵌套的树形结构，允许在<code>Surface</code>上添加子<code>Surface</code>。这是由于<code>Surface</code>可能有着不同的像素格式，比如父<code>Surface</code>是RGB格式的，而子<code>Surface</code>是<code>YUV</code>格式的，这个问题在硬件解码时比较常见。有了<code>Sub Surface</code>特性，就不需要应用程序自己对像素格式进行转换，也少了一层拷贝，只需要将硬件解码出来的位图作为一个<code>Sub Surface</code>的内容即可将其显示在窗口上。</p><p>该类的<code>Private</code>数据定义如下：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
+</code></pre></td></tr></table>
+</div>
+</div><h2 id=metawindowactor>MetaWindowActor</h2>
+<p><code>MetaWindowActor</code>是<code>ClutterActor</code>的子类，其基本目的是将一个<code>MetaWindow</code>与<code>ClutterActor</code>绑定起来，如前面所述。这里只分析其对应<code>Wayland</code>的子类<code>MetaWindowActorWayland</code>。</p>
+<h2 id=metasurfaceactor>MetaSurfaceActor</h2>
+<p><code>MetaSurfaceActor</code>也是<code>ClutterActor</code>的子类，其目的是表示一个<code>surface</code>，类似于<code>Wayland</code>的<code>subsurface</code>的概念，是一个嵌套的树形结构，允许在<code>Surface</code>上添加子<code>Surface</code>。这是由于<code>Surface</code>可能有着不同的像素格式，比如父<code>Surface</code>是RGB格式的，而子<code>Surface</code>是<code>YUV</code>格式的，这个问题在硬件解码时比较常见。有了<code>Sub Surface</code>特性，就不需要应用程序自己对像素格式进行转换，也少了一层拷贝，只需要将硬件解码出来的位图作为一个<code>Sub Surface</code>的内容即可将其显示在窗口上。</p>
+<p>该类的<code>Private</code>数据定义如下：</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt> 1
 </span><span class=lnt> 2
 </span><span class=lnt> 3
 </span><span class=lnt> 4
@@ -179,7 +489,9 @@
 </span><span class=lnt>11
 </span><span class=lnt>12
 </span><span class=lnt>13
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c><span class=k>typedef</span> <span class=k>struct</span> <span class=n>_MetaSurfaceActorPrivate</span>
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=k>typedef</span> <span class=k>struct</span> <span class=n>_MetaSurfaceActorPrivate</span>
 <span class=p>{</span>
   <span class=n>MetaShapedTexture</span> <span class=o>*</span><span class=n>texture</span><span class=p>;</span>
 
@@ -192,7 +504,15 @@
   <span class=n>cairo_region_t</span> <span class=o>*</span><span class=n>pending_damage</span><span class=p>;</span>
   <span class=n>guint</span> <span class=nl>frozen</span> <span class=p>:</span> <span class=mi>1</span><span class=p>;</span>
 <span class=p>}</span> <span class=n>MetaSurfaceActorPrivate</span><span class=p>;</span>
-</code></pre></td></tr></table></div></div><h3 id=meta_surface_actor_update_area>meta_surface_actor_update_area</h3><p>TODO</p><h3 id=metashapedtexture>MetaShapedTexture</h3><p><code>MetaShapedTexture</code>实现了<code>ClutterContent</code>接口，其目的是为一个<code>ClutterActor</code>绘制内容。<code>ClutterContent</code>接口提供的回调函数如下：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
+</code></pre></td></tr></table>
+</div>
+</div><h3 id=meta_surface_actor_update_area>meta_surface_actor_update_area</h3>
+<p>TODO</p>
+<h3 id=metashapedtexture>MetaShapedTexture</h3>
+<p><code>MetaShapedTexture</code>实现了<code>ClutterContent</code>接口，其目的是为一个<code>ClutterActor</code>绘制内容。<code>ClutterContent</code>接口提供的回调函数如下：</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt> 1
 </span><span class=lnt> 2
 </span><span class=lnt> 3
 </span><span class=lnt> 4
@@ -207,7 +527,9 @@
 </span><span class=lnt>13
 </span><span class=lnt>14
 </span><span class=lnt>15
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c><span class=k>struct</span> <span class=n>ClutterContentIface</span> <span class=p>{</span>
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=k>struct</span> <span class=n>ClutterContentIface</span> <span class=p>{</span>
   <span class=n>gboolean</span>      <span class=p>(</span><span class=o>*</span> <span class=n>get_preferred_size</span><span class=p>)</span>  <span class=p>(</span><span class=n>ClutterContent</span>   <span class=o>*</span><span class=n>content</span><span class=p>,</span>
                                          <span class=n>gfloat</span>           <span class=o>*</span><span class=n>width</span><span class=p>,</span>
                                          <span class=n>gfloat</span>           <span class=o>*</span><span class=n>height</span><span class=p>);</span>
@@ -222,7 +544,15 @@
 
   <span class=kt>void</span>          <span class=p>(</span><span class=o>*</span> <span class=n>invalidate</span><span class=p>)</span>          <span class=p>(</span><span class=n>ClutterContent</span>   <span class=o>*</span><span class=n>content</span><span class=p>);</span>
 <span class=p>};</span>
-</code></pre></td></tr></table></div></div><p>具体到<code>MetaShapedTexture</code>，则是将一个<code>CoglTexture</code>表示的材质绘制到<code>ClutterActor</code>上。</p><h3 id=meta_shaped_texture_update_area>meta_shaped_texture_update_area</h3><h2 id=metamonitor>MetaMonitor</h2><p>这个类型很明显是对显示器的抽象。事实上，Mutter中的<code>MetaMonitor</code>分为两个子类：<code>MetaMonitorTiled</code>和<code>MetaMonitorNormal</code>，这里只分析<code>MetaMonitorNormal</code>。Mutter中定义了一系列描述显示器相关信息与设置的类型：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
+</code></pre></td></tr></table>
+</div>
+</div><p>具体到<code>MetaShapedTexture</code>，则是将一个<code>CoglTexture</code>表示的材质绘制到<code>ClutterActor</code>上。</p>
+<h3 id=meta_shaped_texture_update_area>meta_shaped_texture_update_area</h3>
+<h2 id=metamonitor>MetaMonitor</h2>
+<p>这个类型很明显是对显示器的抽象。事实上，Mutter中的<code>MetaMonitor</code>分为两个子类：<code>MetaMonitorTiled</code>和<code>MetaMonitorNormal</code>，这里只分析<code>MetaMonitorNormal</code>。Mutter中定义了一系列描述显示器相关信息与设置的类型：</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt> 1
 </span><span class=lnt> 2
 </span><span class=lnt> 3
 </span><span class=lnt> 4
@@ -235,7 +565,9 @@
 </span><span class=lnt>11
 </span><span class=lnt>12
 </span><span class=lnt>13
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c><span class=k>typedef</span> <span class=k>struct</span> <span class=n>_MetaMonitorModeSpec</span>
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=k>typedef</span> <span class=k>struct</span> <span class=n>_MetaMonitorModeSpec</span>
 <span class=p>{</span>
   <span class=kt>int</span> <span class=n>width</span><span class=p>;</span>
   <span class=kt>int</span> <span class=n>height</span><span class=p>;</span>
@@ -248,7 +580,12 @@
   <span class=n>MetaOutput</span> <span class=o>*</span><span class=n>output</span><span class=p>;</span>
   <span class=n>MetaCrtcMode</span> <span class=o>*</span><span class=n>crtc_mode</span><span class=p>;</span>
 <span class=p>}</span> <span class=n>MetaMonitorCrtcMode</span><span class=p>;</span>
-</code></pre></td></tr></table></div></div><p><code>MetaMonitor</code>从设计上就需要其子类实现一系列虚函数：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
+</code></pre></td></tr></table>
+</div>
+</div><p><code>MetaMonitor</code>从设计上就需要其子类实现一系列虚函数：</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt> 1
 </span><span class=lnt> 2
 </span><span class=lnt> 3
 </span><span class=lnt> 4
@@ -258,7 +595,9 @@
 </span><span class=lnt> 8
 </span><span class=lnt> 9
 </span><span class=lnt>10
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c><span class=k>static</span> <span class=kt>void</span>
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=k>static</span> <span class=kt>void</span>
 <span class=nf>meta_monitor_normal_class_init</span> <span class=p>(</span><span class=n>MetaMonitorNormalClass</span> <span class=o>*</span><span class=n>klass</span><span class=p>)</span>
 <span class=p>{</span>
   <span class=n>MetaMonitorClass</span> <span class=o>*</span><span class=n>monitor_class</span> <span class=o>=</span> <span class=n>META_MONITOR_CLASS</span> <span class=p>(</span><span class=n>klass</span><span class=p>);</span>
@@ -268,7 +607,22 @@
   <span class=n>monitor_class</span><span class=o>-&gt;</span><span class=n>calculate_crtc_pos</span> <span class=o>=</span> <span class=n>meta_monitor_normal_calculate_crtc_pos</span><span class=p>;</span>
   <span class=n>monitor_class</span><span class=o>-&gt;</span><span class=n>get_suggested_position</span> <span class=o>=</span> <span class=n>meta_monitor_normal_get_suggested_position</span><span class=p>;</span>
 <span class=p>}</span>
-</code></pre></td></tr></table></div></div><p>从代码中来看，<code>MetaMonitor</code>记录了整个显示器的状态。包括：</p><ul><li>这个显示器属于哪一个GPU</li><li>这个显示的包含的output，这里的<code>MetaOutput</code>是抽象DRM输出口的概念，这样可以实现复制屏</li><li>显示器的mode，优先的mode，当前的mode</li><li>显示器参数（复制于第一个output）</li><li>窗口系统ID</li></ul><h2 id=metamonitormanager>MetaMonitorManager</h2><p>这个类本质上就是你在<code>gnome-control-center</code>里配置显示器选项时的直接接口。事实上，<code>gnome-control-center</code>是通过<code>dbus</code>接口与系统组件进行通信的，为了让系统中的进程可以配置显示器属性，<code>MetaMonitorManager</code>中实现了<code>org.gnome.Mutter.DisplayConfig</code>接口。</p><p>由于存在外部接口，对这个类型的分析就从dbus接口开始。在创建对象之时，会创建dbus接口：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
+</code></pre></td></tr></table>
+</div>
+</div><p>从代码中来看，<code>MetaMonitor</code>记录了整个显示器的状态。包括：</p>
+<ul>
+<li>这个显示器属于哪一个GPU</li>
+<li>这个显示的包含的output，这里的<code>MetaOutput</code>是抽象DRM输出口的概念，这样可以实现复制屏</li>
+<li>显示器的mode，优先的mode，当前的mode</li>
+<li>显示器参数（复制于第一个output）</li>
+<li>窗口系统ID</li>
+</ul>
+<h2 id=metamonitormanager>MetaMonitorManager</h2>
+<p>这个类本质上就是你在<code>gnome-control-center</code>里配置显示器选项时的直接接口。事实上，<code>gnome-control-center</code>是通过<code>dbus</code>接口与系统组件进行通信的，为了让系统中的进程可以配置显示器属性，<code>MetaMonitorManager</code>中实现了<code>org.gnome.Mutter.DisplayConfig</code>接口。</p>
+<p>由于存在外部接口，对这个类型的分析就从dbus接口开始。在创建对象之时，会创建dbus接口：</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt> 1
 </span><span class=lnt> 2
 </span><span class=lnt> 3
 </span><span class=lnt> 4
@@ -278,7 +632,9 @@
 </span><span class=lnt> 8
 </span><span class=lnt> 9
 </span><span class=lnt>10
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c>  <span class=n>manager</span><span class=o>-&gt;</span><span class=n>dbus_name_id</span> <span class=o>=</span> <span class=n>g_bus_own_name</span> <span class=p>(</span><span class=n>G_BUS_TYPE_SESSION</span><span class=p>,</span>
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c>  <span class=n>manager</span><span class=o>-&gt;</span><span class=n>dbus_name_id</span> <span class=o>=</span> <span class=n>g_bus_own_name</span> <span class=p>(</span><span class=n>G_BUS_TYPE_SESSION</span><span class=p>,</span>
                                           <span class=s>&#34;org.gnome.Mutter.DisplayConfig&#34;</span><span class=p>,</span>
                                           <span class=n>G_BUS_NAME_OWNER_FLAGS_ALLOW_REPLACEMENT</span> <span class=o>|</span>
                                           <span class=p>(</span><span class=n>meta_get_replace_current_wm</span> <span class=p>()</span> <span class=o>?</span>
@@ -288,31 +644,68 @@
                                           <span class=n>on_name_lost</span><span class=p>,</span>
                                           <span class=n>g_object_ref</span> <span class=p>(</span><span class=n>manager</span><span class=p>),</span>
                                           <span class=n>g_object_unref</span><span class=p>);</span>
-</code></pre></td></tr></table></div></div><p>接口相关代码是由<code>gdbus-codegen</code>生成的，我们只需要知道其基本模型是<code>gdbus-codegen</code>帮助生成一个GObject，然后我们监听其上特定的信号，即可知道其他人调用了特定的method。作为典型案例，分析<code>handle-apply-monitors-config</code>信号的处理，即<code>ApplyMonitorsConfig</code>方法的处理函数。</p><h3 id=applymonitorsconfig>ApplyMonitorsConfig</h3><p>函数首先检查<code>serial</code>的值是否与当前<code>MetaMonitorManager</code>保存的<code>serial</code>是否一致，如果不一致，则认为调用方设置的参数不合法。这个操作是因为显示器的属性是动态改变的，如果配置发生变化，则<code>MetaMonitorManager</code>会自增自身保存的<code>serial</code>，与此同时通过<code>GetResources</code>获取显示器属性时，也会拿到一个<code>serial</code>。通过<code>serial</code>的比对，可以确定调用方手中保存的属性是否合法。忽略掉中间复杂的参数处理，函数最后生成一个<code>MetaMonitorsConfig</code>对象，并调用<code>meta_monitor_manager_apply_monitors_config</code>，最后调用到子类实现的<code>apply_monitors_config</code>虚函数。由于这里分析的是Native后端，则对应子类为<code>MetaMonitorManagerKms</code>。</p><h2 id=metamonitormanagerkms>MetaMonitorManagerKms</h2><h3 id=layoutmode>LayoutMode</h3><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt>1
+</code></pre></td></tr></table>
+</div>
+</div><p>接口相关代码是由<code>gdbus-codegen</code>生成的，我们只需要知道其基本模型是<code>gdbus-codegen</code>帮助生成一个GObject，然后我们监听其上特定的信号，即可知道其他人调用了特定的method。作为典型案例，分析<code>handle-apply-monitors-config</code>信号的处理，即<code>ApplyMonitorsConfig</code>方法的处理函数。</p>
+<h3 id=applymonitorsconfig>ApplyMonitorsConfig</h3>
+<p>函数首先检查<code>serial</code>的值是否与当前<code>MetaMonitorManager</code>保存的<code>serial</code>是否一致，如果不一致，则认为调用方设置的参数不合法。这个操作是因为显示器的属性是动态改变的，如果配置发生变化，则<code>MetaMonitorManager</code>会自增自身保存的<code>serial</code>，与此同时通过<code>GetResources</code>获取显示器属性时，也会拿到一个<code>serial</code>。通过<code>serial</code>的比对，可以确定调用方手中保存的属性是否合法。忽略掉中间复杂的参数处理，函数最后生成一个<code>MetaMonitorsConfig</code>对象，并调用<code>meta_monitor_manager_apply_monitors_config</code>，最后调用到子类实现的<code>apply_monitors_config</code>虚函数。由于这里分析的是Native后端，则对应子类为<code>MetaMonitorManagerKms</code>。</p>
+<h2 id=metamonitormanagerkms>MetaMonitorManagerKms</h2>
+<h3 id=layoutmode>LayoutMode</h3>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt>1
 </span><span class=lnt>2
 </span><span class=lnt>3
 </span><span class=lnt>4
 </span><span class=lnt>5
 </span><span class=lnt>6
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c><span class=cm>/* Equivalent to the &#39;layout-mode&#39; enum in org.gnome.Mutter.DisplayConfig */</span>
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=cm>/* Equivalent to the &#39;layout-mode&#39; enum in org.gnome.Mutter.DisplayConfig */</span>
 <span class=k>typedef</span> <span class=k>enum</span> <span class=n>_MetaLogicalMonitorLayoutMode</span>
 <span class=p>{</span>
   <span class=n>META_LOGICAL_MONITOR_LAYOUT_MODE_LOGICAL</span> <span class=o>=</span> <span class=mi>1</span><span class=p>,</span>
   <span class=n>META_LOGICAL_MONITOR_LAYOUT_MODE_PHYSICAL</span> <span class=o>=</span> <span class=mi>2</span>
 <span class=p>}</span> <span class=n>MetaLogicalMonitorLayoutMode</span><span class=p>;</span>
-</code></pre></td></tr></table></div></div><p>只要系统中开启的<code>fractional scaling</code>的特性，默认使用<code>Logical</code>模式，否则为<code>Physical</code>模式。在<code>Physical</code>模式下，一个<code>MetaMonitor</code>的维度使用显示器分辨率，而<code>Logical</code>模式下使用显示器分辨率除以缩放系数作为维度。详见<code>org.gnome.Mutter.DisplayConfig.xml</code>文件中相关的描述。</p><h3 id=calculate_supported_scales>calculate_supported_scales</h3><p>该函数计算一个显示器分辨率支持的缩放系数。这个函数实现的基本思路是枚举缩放系数，然后进行修正。从代码中可以看到枚举步长，最大值与最小值：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt>1
+</code></pre></td></tr></table>
+</div>
+</div><p>只要系统中开启的<code>fractional scaling</code>的特性，默认使用<code>Logical</code>模式，否则为<code>Physical</code>模式。在<code>Physical</code>模式下，一个<code>MetaMonitor</code>的维度使用显示器分辨率，而<code>Logical</code>模式下使用显示器分辨率除以缩放系数作为维度。详见<code>org.gnome.Mutter.DisplayConfig.xml</code>文件中相关的描述。</p>
+<h3 id=calculate_supported_scales>calculate_supported_scales</h3>
+<p>该函数计算一个显示器分辨率支持的缩放系数。这个函数实现的基本思路是枚举缩放系数，然后进行修正。从代码中可以看到枚举步长，最大值与最小值：</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt>1
 </span><span class=lnt>2
 </span><span class=lnt>3
 </span><span class=lnt>4
 </span><span class=lnt>5
 </span><span class=lnt>6
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c><span class=cp>#define SCALE_FACTORS_PER_INTEGER 4
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=cp>#define SCALE_FACTORS_PER_INTEGER 4
 </span><span class=cp>#define SCALE_FACTORS_STEPS (1.0 / (float) SCALE_FACTORS_PER_INTEGER)
 </span><span class=cp>#define MINIMUM_SCALE_FACTOR 1.0f
 </span><span class=cp>#define MAXIMUM_SCALE_FACTOR 4.0f
 </span><span class=cp>#define MINIMUM_LOGICAL_AREA (800 * 480)
 </span><span class=cp>#define MAXIMUM_REFRESH_RATE_DIFF 0.001
-</span></code></pre></td></tr></table></div></div><p>即函数以0.25以步长，从1.0开始，依次1.0, 1.25, 1.5, 1.75 &mldr;. 直到4.0。经过枚举之后，枚举出来的缩放系数并不一定能够工作正常，需要进一步修正。首先明确终极目标，或者说什么情况下缩放系数才合法：存在分辨率<code>w x h</code>使得：$ a \times w = mode.w \and a \times h = mode.h $，其中w与h为整数。所以函数使用了一个算法，首先计算<code>floor(mode.w / a)</code>，这是一个整数，然后以这个整数为中心依次向两边推开，然后验证<code>mode.h / a</code>是否也是一个整数。经过这样的枚举，最终得到对一个分辨率可以使用的缩放系数。</p><h3 id=calculate_monitor_mode_scale>calculate_monitor_mode_scale</h3><p>本质上调用<code>MetaMonitor</code>上的<code>calculate_mode_scale</code>计算一个<code>MetaMonitorMode</code>应该使用的缩放系数。实现方式比较naive，没有照顾到HiDPI屏幕，后面我可能在这里开刀，增加计算HiDPI屏幕缩放系数的相关代码。函数首先检查有没有设置全局缩放系数，如果设置了，就使用它。否则根据从<code>MetaMonitor</code>中读出显示器的分辨率和物理尺寸（毫米），然后计算出屏幕DPI，如果超过一定限度，则将缩放系数设置成2.0。</p><p>如果我要实现HiDPI屏幕的支持，计算出对应于<code>HiDPI</code>屏幕正确的缩放系数，那么我感觉需要进行如下步骤：</p><ul><li>首先判断是否支持<code>fractional scaling</code>，不支持的话直接跳过</li><li>随后计算屏幕DPI</li><li>枚举所有支持的缩放系数，然后检查经过缩放后的DPI是否会落在一个合理范围内</li><li>第一个使DPI落在合理范围内的缩放系数即使我们想要的缩放系数</li></ul><h2 id=metacullable>MetaCullable</h2><p>最近碰到了<code>MetaCullabler</code>相关的问题，详见<a href=https://gitlab.gnome.org/GNOME/mutter/-/issues/1500>#1500</a>。<code>MetaCullable</code>是一个相对于Clutter的优化，本质上是在将ClutterActor提交给opengl渲染器进行渲染前，提前将一些不合适的<code>ClutterActor</code>去掉，让其不参与渲染。这样做的意义源自目前PC上主要使用的都是独立显卡，一般为独立显存，进行渲染时，需要先将材质上传到显存中，而显存拷贝时的带宽是有瓶颈的。如果将所有的<code>ClutterActor</code>提交渲染，则会占用大量的显存带宽，而没有任何实际意义，因为<code>ClutterActor</code>形成的树在Mutter应用场景下大部分都是堆叠的2D平面图片，没有什么特效（3D变换）。也就是说，可以通过一个简单的算法让<code>ClutterActor</code>决定是否将自己<code>Cull</code>掉，即从最终进行渲染的<code>ClutterActor</code>中去掉。</p><p><code>MetaCullable</code>是一个GInterface，很明显<code>MetaWindowActor</code>需要实现该Interface。</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
+</span></code></pre></td></tr></table>
+</div>
+</div><p>即函数以0.25以步长，从1.0开始，依次1.0, 1.25, 1.5, 1.75 &mldr;. 直到4.0。经过枚举之后，枚举出来的缩放系数并不一定能够工作正常，需要进一步修正。首先明确终极目标，或者说什么情况下缩放系数才合法：存在分辨率<code>w x h</code>使得：$ a \times w = mode.w \and a \times h = mode.h $，其中w与h为整数。所以函数使用了一个算法，首先计算<code>floor(mode.w / a)</code>，这是一个整数，然后以这个整数为中心依次向两边推开，然后验证<code>mode.h / a</code>是否也是一个整数。经过这样的枚举，最终得到对一个分辨率可以使用的缩放系数。</p>
+<h3 id=calculate_monitor_mode_scale>calculate_monitor_mode_scale</h3>
+<p>本质上调用<code>MetaMonitor</code>上的<code>calculate_mode_scale</code>计算一个<code>MetaMonitorMode</code>应该使用的缩放系数。实现方式比较naive，没有照顾到HiDPI屏幕，后面我可能在这里开刀，增加计算HiDPI屏幕缩放系数的相关代码。函数首先检查有没有设置全局缩放系数，如果设置了，就使用它。否则根据从<code>MetaMonitor</code>中读出显示器的分辨率和物理尺寸（毫米），然后计算出屏幕DPI，如果超过一定限度，则将缩放系数设置成2.0。</p>
+<p>如果我要实现HiDPI屏幕的支持，计算出对应于<code>HiDPI</code>屏幕正确的缩放系数，那么我感觉需要进行如下步骤：</p>
+<ul>
+<li>首先判断是否支持<code>fractional scaling</code>，不支持的话直接跳过</li>
+<li>随后计算屏幕DPI</li>
+<li>枚举所有支持的缩放系数，然后检查经过缩放后的DPI是否会落在一个合理范围内</li>
+<li>第一个使DPI落在合理范围内的缩放系数即使我们想要的缩放系数</li>
+</ul>
+<h2 id=metacullable>MetaCullable</h2>
+<p>最近碰到了<code>MetaCullabler</code>相关的问题，详见<a href=https://gitlab.gnome.org/GNOME/mutter/-/issues/1500>#1500</a>。<code>MetaCullable</code>是一个相对于Clutter的优化，本质上是在将ClutterActor提交给opengl渲染器进行渲染前，提前将一些不合适的<code>ClutterActor</code>去掉，让其不参与渲染。这样做的意义源自目前PC上主要使用的都是独立显卡，一般为独立显存，进行渲染时，需要先将材质上传到显存中，而显存拷贝时的带宽是有瓶颈的。如果将所有的<code>ClutterActor</code>提交渲染，则会占用大量的显存带宽，而没有任何实际意义，因为<code>ClutterActor</code>形成的树在Mutter应用场景下大部分都是堆叠的2D平面图片，没有什么特效（3D变换）。也就是说，可以通过一个简单的算法让<code>ClutterActor</code>决定是否将自己<code>Cull</code>掉，即从最终进行渲染的<code>ClutterActor</code>中去掉。</p>
+<p><code>MetaCullable</code>是一个GInterface，很明显<code>MetaWindowActor</code>需要实现该Interface。</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt> 1
 </span><span class=lnt> 2
 </span><span class=lnt> 3
 </span><span class=lnt> 4
@@ -322,7 +715,9 @@
 </span><span class=lnt> 8
 </span><span class=lnt> 9
 </span><span class=lnt>10
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c><span class=k>struct</span> <span class=n>_MetaCullableInterface</span>
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=k>struct</span> <span class=n>_MetaCullableInterface</span>
 <span class=p>{</span>
   <span class=n>GTypeInterface</span> <span class=n>g_iface</span><span class=p>;</span>
 
@@ -332,7 +727,14 @@
   <span class=n>gboolean</span> <span class=p>(</span><span class=o>*</span> <span class=n>is_untransformed</span><span class=p>)</span> <span class=p>(</span><span class=n>MetaCullable</span> <span class=o>*</span><span class=n>cullable</span><span class=p>);</span>
   <span class=kt>void</span> <span class=p>(</span><span class=o>*</span> <span class=n>reset_culling</span><span class=p>)</span> <span class=p>(</span><span class=n>MetaCullable</span>  <span class=o>*</span><span class=n>cullable</span><span class=p>);</span>
 <span class=p>};</span>
-</code></pre></td></tr></table></div></div><p>在Mutter中，很多实现该接口的类型，其实现的<code>cull_out</code>函数都是直接调用<code>meta_cullable_cull_out_children</code>实现的。</p><h3 id=最初的调用入口>最初的调用入口</h3><p>在代码中搜索<code>meta_cullable_cull_out</code>，可以找到该函数唯一的外部调用，即在<code>meta_window_group_paint</code>中。我们知道<code>MetaWindowGroup</code>是一个<code>ClutterActor</code>的子类，表示当前Mutter虚拟显示区域，它的children就是各个<code>MetaWindowActor</code>。可以看到<code>meta_cullable_cull_out</code>最初的两个参数由如下方式生成：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
+</code></pre></td></tr></table>
+</div>
+</div><p>在Mutter中，很多实现该接口的类型，其实现的<code>cull_out</code>函数都是直接调用<code>meta_cullable_cull_out_children</code>实现的。</p>
+<h3 id=最初的调用入口>最初的调用入口</h3>
+<p>在代码中搜索<code>meta_cullable_cull_out</code>，可以找到该函数唯一的外部调用，即在<code>meta_window_group_paint</code>中。我们知道<code>MetaWindowGroup</code>是一个<code>ClutterActor</code>的子类，表示当前Mutter虚拟显示区域，它的children就是各个<code>MetaWindowActor</code>。可以看到<code>meta_cullable_cull_out</code>最初的两个参数由如下方式生成：</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt> 1
 </span><span class=lnt> 2
 </span><span class=lnt> 3
 </span><span class=lnt> 4
@@ -346,7 +748,9 @@
 </span><span class=lnt>12
 </span><span class=lnt>13
 </span><span class=lnt>14
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c>  <span class=n>visible_rect</span><span class=p>.</span><span class=n>x</span> <span class=o>=</span> <span class=n>visible_rect</span><span class=p>.</span><span class=n>y</span> <span class=o>=</span> <span class=mi>0</span><span class=p>;</span>
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c>  <span class=n>visible_rect</span><span class=p>.</span><span class=n>x</span> <span class=o>=</span> <span class=n>visible_rect</span><span class=p>.</span><span class=n>y</span> <span class=o>=</span> <span class=mi>0</span><span class=p>;</span>
   <span class=n>visible_rect</span><span class=p>.</span><span class=n>width</span> <span class=o>=</span> <span class=n>clutter_actor_get_width</span> <span class=p>(</span><span class=n>CLUTTER_ACTOR</span> <span class=p>(</span><span class=n>stage</span><span class=p>));</span>
   <span class=n>visible_rect</span><span class=p>.</span><span class=n>height</span> <span class=o>=</span> <span class=n>clutter_actor_get_height</span> <span class=p>(</span><span class=n>CLUTTER_ACTOR</span> <span class=p>(</span><span class=n>stage</span><span class=p>));</span>
 
@@ -360,23 +764,53 @@
   <span class=n>clip_region</span> <span class=o>=</span> <span class=n>cairo_region_copy</span> <span class=p>(</span><span class=n>redraw_clip</span><span class=p>);</span>
 
   <span class=n>cairo_region_translate</span> <span class=p>(</span><span class=n>clip_region</span><span class=p>,</span> <span class=o>-</span><span class=n>paint_x_origin</span><span class=p>,</span> <span class=o>-</span><span class=n>paint_y_origin</span><span class=p>);</span>
-</code></pre></td></tr></table></div></div><p>其中<code>obscured_region</code>应该是<code>MetaWindowGroup</code>的整个大小，而<code>clip_region</code>一般情况下就是<code>redraw_clip</code>。</p><h3 id=meta_background_actor_cull_out>meta_background_actor_cull_out</h3><p>该函数为<code>MetaBackgroundActor</code>实现的<code>cull_out</code>回调函数。函数简单检查是否有content，如果有则将cull_out让其代为执行：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt>1
+</code></pre></td></tr></table>
+</div>
+</div><p>其中<code>obscured_region</code>应该是<code>MetaWindowGroup</code>的整个大小，而<code>clip_region</code>一般情况下就是<code>redraw_clip</code>。</p>
+<h3 id=meta_background_actor_cull_out>meta_background_actor_cull_out</h3>
+<p>该函数为<code>MetaBackgroundActor</code>实现的<code>cull_out</code>回调函数。函数简单检查是否有content，如果有则将cull_out让其代为执行：</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt>1
 </span><span class=lnt>2
 </span><span class=lnt>3
 </span><span class=lnt>4
 </span><span class=lnt>5
 </span><span class=lnt>6
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c>  <span class=k>if</span> <span class=p>(</span><span class=o>!</span><span class=n>self</span><span class=o>-&gt;</span><span class=n>content</span><span class=p>)</span>
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c>  <span class=k>if</span> <span class=p>(</span><span class=o>!</span><span class=n>self</span><span class=o>-&gt;</span><span class=n>content</span><span class=p>)</span>
     <span class=k>return</span><span class=p>;</span>
 
   <span class=n>meta_background_content_cull_out</span> <span class=p>(</span><span class=n>self</span><span class=o>-&gt;</span><span class=n>content</span><span class=p>,</span>
                                     <span class=n>unobscured_region</span><span class=p>,</span>
                                     <span class=n>clip_region</span><span class=p>);</span>
-</code></pre></td></tr></table></div></div><p>而<code>meta_background_content_cull_out</code>仅仅是将这个参数保存到<code>MetaBackgroundContent</code>中，并不进行额外的操作。</p><h3 id=meta_surface_actor_cull_out>meta_surface_actor_cull_out</h3><p>TODO</p><h3 id=meta_cullable_cull_out_children>meta_cullable_cull_out_children</h3><p>该函数的完成的工作非常简单，仅仅是遍历当前<code>ClutterActor</code>所有的子<code>ClutterActor</code>，然后在他们上面继续调用<code>meta_cullable_cull_out</code>函数。当然这只是粗略的描述，有一些细节还是要看的。在遍历过程中，函数首先检查该子<code>ClutterActor</code>（子类）是否实现了<code>MetaCullable</code>接口，如果没有则跳过该子<code>ClutterActor</code>：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt>1
+</code></pre></td></tr></table>
+</div>
+</div><p>而<code>meta_background_content_cull_out</code>仅仅是将这个参数保存到<code>MetaBackgroundContent</code>中，并不进行额外的操作。</p>
+<h3 id=meta_surface_actor_cull_out>meta_surface_actor_cull_out</h3>
+<p>TODO</p>
+<h3 id=meta_cullable_cull_out_children>meta_cullable_cull_out_children</h3>
+<p>该函数的完成的工作非常简单，仅仅是遍历当前<code>ClutterActor</code>所有的子<code>ClutterActor</code>，然后在他们上面继续调用<code>meta_cullable_cull_out</code>函数。当然这只是粗略的描述，有一些细节还是要看的。在遍历过程中，函数首先检查该子<code>ClutterActor</code>（子类）是否实现了<code>MetaCullable</code>接口，如果没有则跳过该子<code>ClutterActor</code>：</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt>1
 </span><span class=lnt>2
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c>      <span class=k>if</span> <span class=p>(</span><span class=o>!</span><span class=n>META_IS_CULLABLE</span> <span class=p>(</span><span class=n>child</span><span class=p>))</span>
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c>      <span class=k>if</span> <span class=p>(</span><span class=o>!</span><span class=n>META_IS_CULLABLE</span> <span class=p>(</span><span class=n>child</span><span class=p>))</span>
         <span class=k>continue</span><span class=p>;</span>
-</code></pre></td></tr></table></div></div><p>允许culling的前提是：</p><ul><li>传入的两个参数<code>unobscured_region</code>和<code>clip_region</code>都不为空</li><li>子<code>ClutterActor</code>的没有特效（effective），没有进行过变换</li></ul><p>一旦进行需要进行culling，则将两个参数<code>unobscured_region</code>和<code>clip_region</code>的坐标转换为子<code>ClutterActor</code>的，然后调用<code>meta_cullable_cull_out</code>：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
+</code></pre></td></tr></table>
+</div>
+</div><p>允许culling的前提是：</p>
+<ul>
+<li>传入的两个参数<code>unobscured_region</code>和<code>clip_region</code>都不为空</li>
+<li>子<code>ClutterActor</code>的没有特效（effective），没有进行过变换</li>
+</ul>
+<p>一旦进行需要进行culling，则将两个参数<code>unobscured_region</code>和<code>clip_region</code>的坐标转换为子<code>ClutterActor</code>的，然后调用<code>meta_cullable_cull_out</code>：</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt> 1
 </span><span class=lnt> 2
 </span><span class=lnt> 3
 </span><span class=lnt> 4
@@ -393,7 +827,9 @@
 </span><span class=lnt>15
 </span><span class=lnt>16
 </span><span class=lnt>17
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c>      <span class=k>if</span> <span class=p>(</span><span class=n>needs_culling</span><span class=p>)</span>
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c>      <span class=k>if</span> <span class=p>(</span><span class=n>needs_culling</span><span class=p>)</span>
         <span class=p>{</span>
           <span class=n>clutter_actor_get_position</span> <span class=p>(</span><span class=n>child</span><span class=p>,</span> <span class=o>&amp;</span><span class=n>x</span><span class=p>,</span> <span class=o>&amp;</span><span class=n>y</span><span class=p>);</span>
 
@@ -410,20 +846,79 @@
         <span class=p>{</span>
           <span class=n>meta_cullable_cull_out</span> <span class=p>(</span><span class=n>META_CULLABLE</span> <span class=p>(</span><span class=n>child</span><span class=p>),</span> <span class=nb>NULL</span><span class=p>,</span> <span class=nb>NULL</span><span class=p>);</span>
         <span class=p>}</span>
-</code></pre></td></tr></table></div></div><p>反之也会调用<code>meta_cullable_cull_out</code>，但是传入的两个参数为空。</p></div><div class=post-copyright><p class=copyright-item><span class=item-title>文章作者</span>
-<span class=item-content>crab2313</span></p><p class=copyright-item><span class=item-title>上次更新</span>
-<span class=item-content>2021-04-07
-<a href=https://github.com/crab2313/blog-doc/commit/3f0136980abc71b1d5d3503d040f052f9c72107c title="blog: mutter codebase analysis">(3f01369)</a></span></p></div><footer class=post-footer><div class=post-tags><a href=/tags/gnome/>gnome</a>
+</code></pre></td></tr></table>
+</div>
+</div><p>反之也会调用<code>meta_cullable_cull_out</code>，但是传入的两个参数为空。</p>
+</div>
+<div class=post-copyright>
+<p class=copyright-item>
+<span class=item-title>文章作者</span>
+<span class=item-content>crab2313</span>
+</p>
+<p class=copyright-item>
+<span class=item-title>上次更新</span>
+<span class=item-content>
+2021-04-07
+<a href=https://github.com/crab2313/blog-doc/commit/3f0136980abc71b1d5d3503d040f052f9c72107c title="blog: mutter codebase analysis">(3f01369)</a>
+</span>
+</p>
+</div>
+<footer class=post-footer>
+<div class=post-tags>
+<a href=/tags/gnome/>gnome</a>
 <a href=/tags/mutter/>mutter</a>
-<a href=/tags/drm/>drm</a></div><nav class=post-nav><a class=prev href=/post/mutter-a-kms/><i class="iconfont icon-left"></i>
+<a href=/tags/drm/>drm</a>
+</div>
+<nav class=post-nav>
+<a class=prev href=/post/mutter-a-kms/>
+<i class="iconfont icon-left"></i>
 <span class="prev-text nav-default">Mutter实现分析：Atomic Modesetting</span>
-<span class="prev-text nav-mobile">上一篇</span></a>
-<a class=next href=/post/riscv-atomic-barrier-bitops/><span class="next-text nav-default">Linux内核在RISC-V架构下的内存屏障与原子操作</span>
+<span class="prev-text nav-mobile">上一篇</span>
+</a>
+<a class=next href=/post/riscv-atomic-barrier-bitops/>
+<span class="next-text nav-default">Linux内核在RISC-V架构下的内存屏障与原子操作</span>
 <span class="next-text nav-mobile">下一篇</span>
-<i class="iconfont icon-right"></i></a></nav></footer></article></div></div></main><footer id=footer class=footer><div class=social-links><a href=mailto:crab2313@gmail.com class="iconfont icon-email" title=email></a><a href=https://github.com/crab2313 class="iconfont icon-github" title=github></a><a href=https://gitlab.com/crab2313 class="iconfont icon-gitlab" title=gitlab></a><a href=https://space.bilibili.com/1310103 class="iconfont icon-bilibili" title=bilibili></a><a href=/index.xml type=application/rss+xml class="iconfont icon-rss" title=rss></a></div><div class=copyright><span class=power-by>由 <a class=hexo-link href=https://gohugo.io>Hugo</a> 强力驱动</span>
+<i class="iconfont icon-right"></i>
+</a>
+</nav>
+</footer>
+</article>
+</div>
+</div>
+</main>
+<footer id=footer class=footer>
+<div class=social-links>
+<a href=mailto:crab2313@gmail.com class="iconfont icon-email" title=email></a>
+<a href=https://github.com/crab2313 class="iconfont icon-github" title=github></a>
+<a href=https://gitlab.com/crab2313 class="iconfont icon-gitlab" title=gitlab></a>
+<a href=https://space.bilibili.com/1310103 class="iconfont icon-bilibili" title=bilibili></a>
+<a href=/index.xml type=application/rss+xml class="iconfont icon-rss" title=rss></a>
+</div>
+<div class=copyright>
+<span class=power-by>
+由 <a class=hexo-link href=https://gohugo.io>Hugo</a> 强力驱动
+</span>
 <span class=division>|</span>
-<span class=theme-info>主题 -
-<a class=theme-link href=https://github.com/olOwOlo/hugo-theme-even>Even</a></span>
-<span class=copyright-year>&copy;
+<span class=theme-info>
+主题 -
+<a class=theme-link href=https://github.com/olOwOlo/hugo-theme-even>Even</a>
+</span>
+<span class=copyright-year>
+&copy;
 2017 -
-2021<span class=heart><i class="iconfont icon-heart"></i></span><span>crab2313</span></span></div></footer><div class=back-to-top id=back-to-top><i class="iconfont icon-up"></i></div></div><script src=https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin=anonymous></script><script src=https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin=anonymous></script><script src=https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin=anonymous></script><script type=text/javascript src=/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js></script><script type=text/javascript>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']]}}</script><script async src=https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin=anonymous></script></body></html>
+2021<span class=heart><i class="iconfont icon-heart"></i></span><span>crab2313</span>
+</span>
+</div>
+</footer>
+<div class=back-to-top id=back-to-top>
+<i class="iconfont icon-up"></i>
+</div>
+</div>
+<script src=https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin=anonymous></script>
+<script src=https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin=anonymous></script>
+<script src=https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin=anonymous></script>
+<script type=text/javascript src=/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js></script>
+<script type=text/javascript>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']]}}</script>
+<script async src=https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin=anonymous></script>
+</body>
+</html>

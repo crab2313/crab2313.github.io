@@ -1,4 +1,129 @@
-<!doctype html><html lang=zh-cn><head><meta charset=utf-8><meta http-equiv=x-ua-compatible content="IE=edge,chrome=1"><title>Linux内核在RISC-V平台下的static key机制 - crab2313's blog</title><meta name=renderer content="webkit"><meta name=viewport content="width=device-width,initial-scale=1,maximum-scale=1"><meta http-equiv=cache-control content="no-transform"><meta http-equiv=cache-control content="no-siteapp"><meta name=theme-color content="#f8f5ec"><meta name=msapplication-navbutton-color content="#f8f5ec"><meta name=apple-mobile-web-app-capable content="yes"><meta name=apple-mobile-web-app-status-bar-style content="#f8f5ec"><meta name=author content="crab2313"><meta name=description content="这两天在邮件列表中看到了使用static key对内核hot path进行优化的补丁，突然有了兴趣看看内核的底层实现。原理不多说，很容易懂，细节"><meta name=keywords content="blog,kernel"><meta name=generator content="Hugo 0.84.1 with theme even"><link rel=canonical href=/post/static-key/><link rel=apple-touch-icon sizes=180x180 href=/apple-touch-icon.png><link rel=icon type=image/png sizes=32x32 href=/favicon-32x32.png><link rel=icon type=image/png sizes=16x16 href=/favicon-16x16.png><link rel=manifest href=/manifest.json><link rel=mask-icon href=/safari-pinned-tab.svg color=#5bbad5><link href=/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css rel=stylesheet><link rel=stylesheet href=https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin=anonymous><meta property="og:title" content="Linux内核在RISC-V平台下的static key机制"><meta property="og:description" content="这两天在邮件列表中看到了使用static key对内核hot path进行优化的补丁，突然有了兴趣看看内核的底层实现。原理不多说，很容易懂，细节"><meta property="og:type" content="article"><meta property="og:url" content="/post/static-key/"><meta property="article:section" content="post"><meta property="article:published_time" content="2021-06-09T00:00:00+00:00"><meta property="article:modified_time" content="2021-06-11T16:13:41+08:00"><meta itemprop=name content="Linux内核在RISC-V平台下的static key机制"><meta itemprop=description content="这两天在邮件列表中看到了使用static key对内核hot path进行优化的补丁，突然有了兴趣看看内核的底层实现。原理不多说，很容易懂，细节"><meta itemprop=datePublished content="2021-06-09T00:00:00+00:00"><meta itemprop=dateModified content="2021-06-11T16:13:41+08:00"><meta itemprop=wordCount content="7110"><meta itemprop=keywords content="kernel,"><meta name=twitter:card content="summary"><meta name=twitter:title content="Linux内核在RISC-V平台下的static key机制"><meta name=twitter:description content="这两天在邮件列表中看到了使用static key对内核hot path进行优化的补丁，突然有了兴趣看看内核的底层实现。原理不多说，很容易懂，细节"><!--[if lte IE 9]><script src=https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js></script><![endif]--><!--[if lt IE 9]><script src=https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js></script><script src=https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js></script><![endif]--></head><body><div id=mobile-navbar class=mobile-navbar><div class=mobile-header-logo><a href=/ class=logo>crab2313's blog</a></div><div class=mobile-navbar-icon><span></span><span></span><span></span></div></div><nav id=mobile-menu class="mobile-menu slideout-menu"><ul class=mobile-menu-list><a href=/><li class=mobile-menu-item>Home</li></a><a href=/post/><li class=mobile-menu-item>Archives</li></a><a href=/tags/><li class=mobile-menu-item>Tags</li></a><a href=/categories/><li class=mobile-menu-item>Categories</li></a></ul></nav><div class=container id=mobile-panel><header id=header class=header><div class=logo-wrapper><a href=/ class=logo>crab2313's blog</a></div><nav class=site-navbar><ul id=menu class=menu><li class=menu-item><a class=menu-item-link href=/>Home</a></li><li class=menu-item><a class=menu-item-link href=/post/>Archives</a></li><li class=menu-item><a class=menu-item-link href=/tags/>Tags</a></li><li class=menu-item><a class=menu-item-link href=/categories/>Categories</a></li></ul></nav></header><main id=main class=main><div class=content-wrapper><div id=content class=content><article class=post><header class=post-header><h1 class=post-title>Linux内核在RISC-V平台下的static key机制</h1><div class=post-meta><span class=post-time>2021-06-09</span></div></header><div class=post-toc id=post-toc><h2 class=post-toc-title>文章目录</h2><div class=post-toc-content><nav id=TableOfContents><ul><li><a href=#static-key>static key</a><ul><li><a href=#struct-static_key>struct static_key</a></li><li><a href=#分支实现>分支实现</a></li><li><a href=#核心状态逻辑>核心状态逻辑</a></li><li><a href=#__jump_label段>__jump_label段</a></li><li><a href=#状态翻转>状态翻转</a></li></ul></li></ul></nav></div></div><div class=post-content><p>这两天在邮件列表中看到了使用static key对内核hot path进行优化的补丁，突然有了兴趣看看内核的底层实现。原理不多说，很容易懂，细节是魔鬼。</p><h1 id=static-key>static key</h1><p>static key在内核中指一套特定的API，或者说特定的技术。本质上是一种刻意的在汇编层面的优化，目的是在汇编层面敲除掉特定的分支，达到减小指令数与优化流水线的目的。这个描述是比较抽象的，可以用一个具体的例子说明。</p><p>static key本质是内核的一种binary live patching技术，即在运行时动态修改特定的机器指令区域，达到特定目的的行为。举一个比较简单例子：FPU判断。我们知道内核中是不使用浮点指令的，但用户态可能会使用。一般情况下，内核只负责在进程上下文切换时保存FPU相关的寄存器现场。在这个情况下，内核根据hwcap获取的信息确定CPU是否支持FPU相关指令，以此决定是否对浮点寄存器进行保存。这个判断位于<code>switch_to</code>中，一个hot path中，如果使用一个全局的boolean变量进行判断，则会有以下缺点：</p><ul><li>这个变量几乎等同一个常量，只有最初一次赋值，后续不再更改，但我们的代码后需要每次都对其进行检查</li><li>这个变量位于另一个cacheline中，需要远程访问</li><li>这里多了一个分支，要考虑分支预测和流水线的问题</li></ul><p>static key本质是利用了gcc的<code>asm goto</code>特性，即内联汇编支持跳转到外部C代码中的特定label上，以此实现一个特殊的跳转指令。例如，如果不进行跳转的话，可以修改成<code>jmp 0</code>（或者nop）这个形式，直接执行下一条指令。反之，可以live patch成<code>jmp &lt;addr></code>的形式，跳转到特定分支。而这个分支具体的形式，或者相关状态的追踪，通过一个句柄完成，称作<code>static key</code>。</p><p>代码分析应从<code>include/linux/jump_label.h</code>入手，实际上<code>jump_label</code>和static key与各种probe机制是分不开的。</p><h2 id=struct-static_key>struct static_key</h2><p><code>static key</code>相关API的核心是<code>struct static_key</code>结构体，为了保证兼容性，使得不支持jump label的架构支持同样的API，<code>struct static_key</code>有两套定义。在支持jump label的架构下，即<code>CONFIG_JUMP_LABEL</code>已定义时，<code>struct static_key</code>的定义如下：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
+<!doctype html><html lang=zh-cn>
+<head>
+<meta charset=utf-8>
+<meta http-equiv=x-ua-compatible content="IE=edge,chrome=1">
+<title>Linux内核在RISC-V平台下的static key机制 - crab2313's blog</title>
+<meta name=renderer content="webkit">
+<meta name=viewport content="width=device-width,initial-scale=1,maximum-scale=1">
+<meta http-equiv=cache-control content="no-transform">
+<meta http-equiv=cache-control content="no-siteapp">
+<meta name=theme-color content="#f8f5ec">
+<meta name=msapplication-navbutton-color content="#f8f5ec">
+<meta name=apple-mobile-web-app-capable content="yes">
+<meta name=apple-mobile-web-app-status-bar-style content="#f8f5ec">
+<meta name=author content="crab2313"><meta name=description content="这两天在邮件列表中看到了使用static key对内核hot path进行优化的补丁，突然有了兴趣看看内核的底层实现。原理不多说，很容易懂，细节"><meta name=keywords content="blog,kernel">
+<meta name=generator content="Hugo 0.89.2 with theme even">
+<link rel=canonical href=/post/static-key/>
+<link rel=apple-touch-icon sizes=180x180 href=/apple-touch-icon.png>
+<link rel=icon type=image/png sizes=32x32 href=/favicon-32x32.png>
+<link rel=icon type=image/png sizes=16x16 href=/favicon-16x16.png>
+<link rel=manifest href=/manifest.json>
+<link rel=mask-icon href=/safari-pinned-tab.svg color=#5bbad5>
+<link href=/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css rel=stylesheet>
+<link rel=stylesheet href=https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin=anonymous>
+<meta property="og:title" content="Linux内核在RISC-V平台下的static key机制">
+<meta property="og:description" content="这两天在邮件列表中看到了使用static key对内核hot path进行优化的补丁，突然有了兴趣看看内核的底层实现。原理不多说，很容易懂，细节">
+<meta property="og:type" content="article">
+<meta property="og:url" content="/post/static-key/"><meta property="article:section" content="post">
+<meta property="article:published_time" content="2021-06-09T00:00:00+00:00">
+<meta property="article:modified_time" content="2021-06-11T16:13:41+08:00">
+<meta itemprop=name content="Linux内核在RISC-V平台下的static key机制">
+<meta itemprop=description content="这两天在邮件列表中看到了使用static key对内核hot path进行优化的补丁，突然有了兴趣看看内核的底层实现。原理不多说，很容易懂，细节"><meta itemprop=datePublished content="2021-06-09T00:00:00+00:00">
+<meta itemprop=dateModified content="2021-06-11T16:13:41+08:00">
+<meta itemprop=wordCount content="7110">
+<meta itemprop=keywords content="kernel,"><meta name=twitter:card content="summary">
+<meta name=twitter:title content="Linux内核在RISC-V平台下的static key机制">
+<meta name=twitter:description content="这两天在邮件列表中看到了使用static key对内核hot path进行优化的补丁，突然有了兴趣看看内核的底层实现。原理不多说，很容易懂，细节"><!--[if lte IE 9]><script src=https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js></script><![endif]--><!--[if lt IE 9]><script src=https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js></script>
+<script src=https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js></script><![endif]-->
+</head>
+<body>
+<div id=mobile-navbar class=mobile-navbar>
+<div class=mobile-header-logo>
+<a href=/ class=logo>crab2313's blog</a>
+</div>
+<div class=mobile-navbar-icon>
+<span></span>
+<span></span>
+<span></span>
+</div>
+</div>
+<nav id=mobile-menu class="mobile-menu slideout-menu">
+<ul class=mobile-menu-list>
+<a href=/>
+<li class=mobile-menu-item>Home</li>
+</a><a href=/post/>
+<li class=mobile-menu-item>Archives</li>
+</a><a href=/tags/>
+<li class=mobile-menu-item>Tags</li>
+</a><a href=/categories/>
+<li class=mobile-menu-item>Categories</li>
+</a>
+</ul>
+</nav>
+<div class=container id=mobile-panel>
+<header id=header class=header>
+<div class=logo-wrapper>
+<a href=/ class=logo>crab2313's blog</a>
+</div>
+<nav class=site-navbar>
+<ul id=menu class=menu>
+<li class=menu-item>
+<a class=menu-item-link href=/>Home</a>
+</li><li class=menu-item>
+<a class=menu-item-link href=/post/>Archives</a>
+</li><li class=menu-item>
+<a class=menu-item-link href=/tags/>Tags</a>
+</li><li class=menu-item>
+<a class=menu-item-link href=/categories/>Categories</a>
+</li>
+</ul>
+</nav>
+</header>
+<main id=main class=main>
+<div class=content-wrapper>
+<div id=content class=content>
+<article class=post>
+<header class=post-header>
+<h1 class=post-title>Linux内核在RISC-V平台下的static key机制</h1>
+<div class=post-meta>
+<span class=post-time> 2021-06-09 </span>
+</div>
+</header>
+<div class=post-toc id=post-toc>
+<h2 class=post-toc-title>文章目录</h2>
+<div class=post-toc-content>
+<nav id=TableOfContents>
+<ul>
+<li><a href=#static-key>static key</a>
+<ul>
+<li><a href=#struct-static_key>struct static_key</a></li>
+<li><a href=#分支实现>分支实现</a></li>
+<li><a href=#核心状态逻辑>核心状态逻辑</a></li>
+<li><a href=#__jump_label段>__jump_label段</a></li>
+<li><a href=#状态翻转>状态翻转</a></li>
+</ul>
+</li>
+</ul>
+</nav>
+</div>
+</div>
+<div class=post-content>
+<p>这两天在邮件列表中看到了使用static key对内核hot path进行优化的补丁，突然有了兴趣看看内核的底层实现。原理不多说，很容易懂，细节是魔鬼。</p>
+<h1 id=static-key>static key</h1>
+<p>static key在内核中指一套特定的API，或者说特定的技术。本质上是一种刻意的在汇编层面的优化，目的是在汇编层面敲除掉特定的分支，达到减小指令数与优化流水线的目的。这个描述是比较抽象的，可以用一个具体的例子说明。</p>
+<p>static key本质是内核的一种binary live patching技术，即在运行时动态修改特定的机器指令区域，达到特定目的的行为。举一个比较简单例子：FPU判断。我们知道内核中是不使用浮点指令的，但用户态可能会使用。一般情况下，内核只负责在进程上下文切换时保存FPU相关的寄存器现场。在这个情况下，内核根据hwcap获取的信息确定CPU是否支持FPU相关指令，以此决定是否对浮点寄存器进行保存。这个判断位于<code>switch_to</code>中，一个hot path中，如果使用一个全局的boolean变量进行判断，则会有以下缺点：</p>
+<ul>
+<li>这个变量几乎等同一个常量，只有最初一次赋值，后续不再更改，但我们的代码后需要每次都对其进行检查</li>
+<li>这个变量位于另一个cacheline中，需要远程访问</li>
+<li>这里多了一个分支，要考虑分支预测和流水线的问题</li>
+</ul>
+<p>static key本质是利用了gcc的<code>asm goto</code>特性，即内联汇编支持跳转到外部C代码中的特定label上，以此实现一个特殊的跳转指令。例如，如果不进行跳转的话，可以修改成<code>jmp 0</code>（或者nop）这个形式，直接执行下一条指令。反之，可以live patch成<code>jmp &lt;addr></code>的形式，跳转到特定分支。而这个分支具体的形式，或者相关状态的追踪，通过一个句柄完成，称作<code>static key</code>。</p>
+<p>代码分析应从<code>include/linux/jump_label.h</code>入手，实际上<code>jump_label</code>和static key与各种probe机制是分不开的。</p>
+<h2 id=struct-static_key>struct static_key</h2>
+<p><code>static key</code>相关API的核心是<code>struct static_key</code>结构体，为了保证兼容性，使得不支持jump label的架构支持同样的API，<code>struct static_key</code>有两套定义。在支持jump label的架构下，即<code>CONFIG_JUMP_LABEL</code>已定义时，<code>struct static_key</code>的定义如下：</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt> 1
 </span><span class=lnt> 2
 </span><span class=lnt> 3
 </span><span class=lnt> 4
@@ -19,7 +144,9 @@
 </span><span class=lnt>19
 </span><span class=lnt>20
 </span><span class=lnt>21
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c><span class=k>struct</span> <span class=n>static_key</span> <span class=p>{</span>
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=k>struct</span> <span class=n>static_key</span> <span class=p>{</span>
         <span class=n>atomic_t</span> <span class=n>enabled</span><span class=p>;</span>
 <span class=cm>/*
 </span><span class=cm> * Note:
@@ -40,7 +167,13 @@
                 <span class=k>struct</span> <span class=n>static_key_mod</span> <span class=o>*</span><span class=n>next</span><span class=p>;</span>
         <span class=p>};</span>
 <span class=p>};</span>
-</code></pre></td></tr></table></div></div><p>反之，<code>struct static_key</code>仅仅为一个原子变量，API通过原子变量实现，没有使用live patch技术。在上面的定义中，<code>enabled</code>字段用于记录<code>static key</code>被使能的次数，与<code>preempt_count</code>的用途类似。而接下来的union本质上是一个指针，指针指向的地址应该为4字节对齐，这就使得LSB两位可以用作其他用途，用作注释中所述的标志位。</p><p><code>struct static_key</code>可以有两个初始值，如下：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
+</code></pre></td></tr></table>
+</div>
+</div><p>反之，<code>struct static_key</code>仅仅为一个原子变量，API通过原子变量实现，没有使用live patch技术。在上面的定义中，<code>enabled</code>字段用于记录<code>static key</code>被使能的次数，与<code>preempt_count</code>的用途类似。而接下来的union本质上是一个指针，指针指向的地址应该为4字节对齐，这就使得LSB两位可以用作其他用途，用作注释中所述的标志位。</p>
+<p><code>struct static_key</code>可以有两个初始值，如下：</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt> 1
 </span><span class=lnt> 2
 </span><span class=lnt> 3
 </span><span class=lnt> 4
@@ -51,7 +184,9 @@
 </span><span class=lnt> 9
 </span><span class=lnt>10
 </span><span class=lnt>11
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c><span class=cp>#define JUMP_TYPE_FALSE         0UL
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=cp>#define JUMP_TYPE_FALSE         0UL
 </span><span class=cp>#define JUMP_TYPE_TRUE          1UL
 </span><span class=cp>#define JUMP_TYPE_LINKED        2UL
 </span><span class=cp>#define JUMP_TYPE_MASK          3UL
@@ -62,21 +197,34 @@
 </span><span class=cp>#define STATIC_KEY_INIT_FALSE                                   \
 </span><span class=cp>        { .enabled = { 0 },                                     \
 </span><span class=cp>          { .entries = (void *)JUMP_TYPE_FALSE } }
-</span></code></pre></td></tr></table></div></div><p>这就是<code>static key</code>相关API中定义的初始值。简单来说，就是定义这个<code>static key</code>的初始值是true还是false。内核通过一个比较巧妙的方式根据<code>static key</code>的初始值在编译时emit相应的汇编指令，这是一个比较值得学习的C语言trick。这个trick本质上是基于类型的条件编译。在定义了一个<code>struct static_key</code>后，我们如何静态检测其初始值是true还是false？这是一个很重要的信息，直接决定最后生成的branch的汇编应该是什么样的。很明显这里不能去检测结构体的值，因为那样是runtime检查，而不是compile-time检查。</p><p>为了做到compile-time检查初始值，可以利用C语言的类型系统，以及特定的编译器扩展。可以直接进行如下定义：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt>1
+</span></code></pre></td></tr></table>
+</div>
+</div><p>这就是<code>static key</code>相关API中定义的初始值。简单来说，就是定义这个<code>static key</code>的初始值是true还是false。内核通过一个比较巧妙的方式根据<code>static key</code>的初始值在编译时emit相应的汇编指令，这是一个比较值得学习的C语言trick。这个trick本质上是基于类型的条件编译。在定义了一个<code>struct static_key</code>后，我们如何静态检测其初始值是true还是false？这是一个很重要的信息，直接决定最后生成的branch的汇编应该是什么样的。很明显这里不能去检测结构体的值，因为那样是runtime检查，而不是compile-time检查。</p>
+<p>为了做到compile-time检查初始值，可以利用C语言的类型系统，以及特定的编译器扩展。可以直接进行如下定义：</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt>1
 </span><span class=lnt>2
 </span><span class=lnt>3
 </span><span class=lnt>4
 </span><span class=lnt>5
 </span><span class=lnt>6
 </span><span class=lnt>7
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c><span class=k>struct</span> <span class=n>static_key_true</span> <span class=p>{</span>
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=k>struct</span> <span class=n>static_key_true</span> <span class=p>{</span>
         <span class=k>struct</span> <span class=n>static_key</span> <span class=n>key</span><span class=p>;</span>
 <span class=p>};</span>
 
 <span class=k>struct</span> <span class=n>static_key_false</span> <span class=p>{</span>
         <span class=k>struct</span> <span class=n>static_key</span> <span class=n>key</span><span class=p>;</span>
 <span class=p>};</span>
-</code></pre></td></tr></table></div></div><p>并定义用于进行初始化的宏：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt>1
+</code></pre></td></tr></table>
+</div>
+</div><p>并定义用于进行初始化的宏：</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt>1
 </span><span class=lnt>2
 </span><span class=lnt>3
 </span><span class=lnt>4
@@ -84,7 +232,9 @@
 </span><span class=lnt>6
 </span><span class=lnt>7
 </span><span class=lnt>8
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c><span class=cp>#define STATIC_KEY_TRUE_INIT  (struct static_key_true) { .key = STATIC_KEY_INIT_TRUE,  }
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=cp>#define STATIC_KEY_TRUE_INIT  (struct static_key_true) { .key = STATIC_KEY_INIT_TRUE,  }
 </span><span class=cp>#define STATIC_KEY_FALSE_INIT (struct static_key_false){ .key = STATIC_KEY_INIT_FALSE, }
 </span><span class=cp></span>
 <span class=cp>#define DEFINE_STATIC_KEY_TRUE(name)    \
@@ -92,7 +242,12 @@
 </span><span class=cp></span>
 <span class=cp>#define DEFINE_STATIC_KEY_TRUE_RO(name) \
 </span><span class=cp>        struct static_key_true name __ro_after_init = STATIC_KEY_TRUE_INIT
-</span></code></pre></td></tr></table></div></div><p>很明显，通过不同的宏定义出来的结构体虽然内存布局是一样的，但是类型是不一样的。因此可以通过编译器的扩展在编译阶段对其类型进行判断，方法如下：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
+</span></code></pre></td></tr></table>
+</div>
+</div><p>很明显，通过不同的宏定义出来的结构体虽然内存布局是一样的，但是类型是不一样的。因此可以通过编译器的扩展在编译阶段对其类型进行判断，方法如下：</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt> 1
 </span><span class=lnt> 2
 </span><span class=lnt> 3
 </span><span class=lnt> 4
@@ -103,7 +258,9 @@
 </span><span class=lnt> 9
 </span><span class=lnt>10
 </span><span class=lnt>11
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c><span class=cp>#define static_branch_likely(x)                                                 \
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=cp>#define static_branch_likely(x)                                                 \
 </span><span class=cp>({                                                                              \
 </span><span class=cp>        bool branch;                                                            \
 </span><span class=cp>        if (__builtin_types_compatible_p(typeof(*x), struct static_key_true))   \
@@ -114,25 +271,63 @@
 </span><span class=cp>                branch = ____wrong_branch_error();                              \
 </span><span class=cp>        likely_notrace(branch);                                                         \
 </span><span class=cp>})
-</span></code></pre></td></tr></table></div></div><p>这里多余的代码会被编译器优化掉，本质上就是基于类型的条件编译。</p><h2 id=分支实现>分支实现</h2><p>想象一下最终实现的分支应该是什么样子的。首先明白需要进行patch的是什么东西，在最理想的状态下，分支可以被这一套机制优化成如下形式：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt>1
+</span></code></pre></td></tr></table>
+</div>
+</div><p>这里多余的代码会被编译器优化掉，本质上就是基于类型的条件编译。</p>
+<h2 id=分支实现>分支实现</h2>
+<p>想象一下最终实现的分支应该是什么样子的。首先明白需要进行patch的是什么东西，在最理想的状态下，分支可以被这一套机制优化成如下形式：</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt>1
 </span><span class=lnt>2
 </span><span class=lnt>3
 </span><span class=lnt>4
 </span><span class=lnt>5
 </span><span class=lnt>6
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-fallback data-lang=fallback>		nop   -- the point of live patching
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-fallback data-lang=fallback>		nop   -- the point of live patching
 		aaa
 		bbb   -- inline execution code 
 		ccc
 		...
 	1:  branch target
-</code></pre></td></tr></table></div></div><p>在该情况下，分支几乎所有的时间内都会走nop开头的in-line分支代码。也就是说，在该情况下，这里插入分支的代价仅仅是多执行一个nop指令。这个nop指令的位置就是live patching的位置，如果我们想让这个branch走另一条branch路线（也就是if语句的另一个分叉），我们需要将nop修改为<code>jmp 1</code>语句，此时branch会跳转到label 1继续执行。</p><p>我们从原理上推导一下这个分支是什么样子的，应该提供什么样的API：</p><ul><li><p>jump label的使用方式应该与普通boolean变量一致，在代码层面是可以替换的。比如<code>if (condition)</code>可以无缝替换成<code>if (is_jump_label_enabled(&label))</code>这种形式。</p></li><li><p>上面想到的<code>is_jump_label_enabled</code>函数返回一个boolean值，且boolean值根据jump label的状态进行改变。这些jump label应该具有类似如下的实现：<code>nop; return true;</code>或者<code>jmp &lt;label>; .... label: return false; </code>。</p></li><li><p>上面提到的<code>jump label</code>可能有多处地方用到，我们需要记录下来这些jump label的位置信息。</p></li><li><p>最后需要提供一个动态patch<strong>所有分支</strong>的机制。</p></li></ul><p>事实上，上面贴出的<code>static_branch_likely</code>宏即为我们假想的<code>is_jump_label_enabled</code>函数。内核使用了比较巧妙的方法实现了上述要求，并精准抽象出了平台相关与平台无关的实现。我们以RISC-V为平台相关的实现为基准分析<code>jump label</code>的实现。</p><p>Linux要求架构相关代码实现两个函数：<code>arch_static_branch</code>与<code>arch_static_branch_jump</code>。这两个函数的框架如下：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt>1
+</code></pre></td></tr></table>
+</div>
+</div><p>在该情况下，分支几乎所有的时间内都会走nop开头的in-line分支代码。也就是说，在该情况下，这里插入分支的代价仅仅是多执行一个nop指令。这个nop指令的位置就是live patching的位置，如果我们想让这个branch走另一条branch路线（也就是if语句的另一个分叉），我们需要将nop修改为<code>jmp 1</code>语句，此时branch会跳转到label 1继续执行。</p>
+<p>我们从原理上推导一下这个分支是什么样子的，应该提供什么样的API：</p>
+<ul>
+<li>
+<p>jump label的使用方式应该与普通boolean变量一致，在代码层面是可以替换的。比如<code>if (condition)</code>可以无缝替换成<code>if (is_jump_label_enabled(&label))</code>这种形式。</p>
+</li>
+<li>
+<p>上面想到的<code>is_jump_label_enabled</code>函数返回一个boolean值，且boolean值根据jump label的状态进行改变。这些jump label应该具有类似如下的实现：<code>nop; return true;</code>或者<code>jmp &lt;label>; .... label: return false; </code>。</p>
+</li>
+<li>
+<p>上面提到的<code>jump label</code>可能有多处地方用到，我们需要记录下来这些jump label的位置信息。</p>
+</li>
+<li>
+<p>最后需要提供一个动态patch<strong>所有分支</strong>的机制。</p>
+</li>
+</ul>
+<p>事实上，上面贴出的<code>static_branch_likely</code>宏即为我们假想的<code>is_jump_label_enabled</code>函数。内核使用了比较巧妙的方法实现了上述要求，并精准抽象出了平台相关与平台无关的实现。我们以RISC-V为平台相关的实现为基准分析<code>jump label</code>的实现。</p>
+<p>Linux要求架构相关代码实现两个函数：<code>arch_static_branch</code>与<code>arch_static_branch_jump</code>。这两个函数的框架如下：</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt>1
 </span><span class=lnt>2
 </span><span class=lnt>3
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-fallback data-lang=fallback>		nop （live patch point, can be patched to `jmp 1`）
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-fallback data-lang=fallback>		nop （live patch point, can be patched to `jmp 1`）
 		return false;
 	1:   return true;
-</code></pre></td></tr></table></div></div><p>简单来说，这两个函数插入了一个如上分支结构，<code>arch_static_branch</code>直接将patch点填写为nop，而<code>arch_static_branch_jump</code>则将nop替换为了<code>jmp 1</code>，并返回true。他们俩的返回值表示整个分支结构执行时是否发生了跳转，返回false即表示线性执行，没有跳转，反之亦然。接下来分析具体代码实现，以<code>arch_static_branch</code>为例，该函数在RISC-V平台下的实现如下：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
+</code></pre></td></tr></table>
+</div>
+</div><p>简单来说，这两个函数插入了一个如上分支结构，<code>arch_static_branch</code>直接将patch点填写为nop，而<code>arch_static_branch_jump</code>则将nop替换为了<code>jmp 1</code>，并返回true。他们俩的返回值表示整个分支结构执行时是否发生了跳转，返回false即表示线性执行，没有跳转，反之亦然。接下来分析具体代码实现，以<code>arch_static_branch</code>为例，该函数在RISC-V平台下的实现如下：</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt> 1
 </span><span class=lnt> 2
 </span><span class=lnt> 3
 </span><span class=lnt> 4
@@ -152,7 +347,9 @@
 </span><span class=lnt>18
 </span><span class=lnt>19
 </span><span class=lnt>20
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c><span class=k>static</span> <span class=n>__always_inline</span> <span class=kt>bool</span> <span class=nf>arch_static_branch</span><span class=p>(</span><span class=k>struct</span> <span class=n>static_key</span> <span class=o>*</span><span class=n>key</span><span class=p>,</span>
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=k>static</span> <span class=n>__always_inline</span> <span class=kt>bool</span> <span class=nf>arch_static_branch</span><span class=p>(</span><span class=k>struct</span> <span class=n>static_key</span> <span class=o>*</span><span class=n>key</span><span class=p>,</span>
                                                <span class=kt>bool</span> <span class=n>branch</span><span class=p>)</span>
 <span class=p>{</span>
         <span class=n>asm_volatile_goto</span><span class=p>(</span>
@@ -172,37 +369,81 @@
 <span class=nl>label</span><span class=p>:</span>
         <span class=k>return</span> <span class=nb>true</span><span class=p>;</span>
 <span class=p>}</span>
-</code></pre></td></tr></table></div></div><p>首先解释一下内联汇编的上半部分：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt>1
+</code></pre></td></tr></table>
+</div>
+</div><p>首先解释一下内联汇编的上半部分：</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt>1
 </span><span class=lnt>2
 </span><span class=lnt>3
 </span><span class=lnt>4
 </span><span class=lnt>5
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c>                <span class=s>&#34;       .option push                            </span><span class=se>\n\t</span><span class=s>&#34;</span>
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c>                <span class=s>&#34;       .option push                            </span><span class=se>\n\t</span><span class=s>&#34;</span>
                 <span class=s>&#34;       .option norelax                         </span><span class=se>\n\t</span><span class=s>&#34;</span>
                 <span class=s>&#34;       .option norvc                           </span><span class=se>\n\t</span><span class=s>&#34;</span>
                 <span class=s>&#34;1:     nop                                     </span><span class=se>\n\t</span><span class=s>&#34;</span>
                 <span class=s>&#34;       .option pop                             </span><span class=se>\n\t</span><span class=s>&#34;</span>
-</code></pre></td></tr></table></div></div><p><code>.option push</code>与<code>.option pop</code>是通用的，不赘述。<code>norelax</code>和<code>norvc</code>两个是RISC-V特定的option，其语义分别为：</p><ul><li>禁止汇编器和链接器对其进行relax操作，即在汇编和链接时更改指令顺序，进行优化</li><li>禁止汇编器和链接器生成compression扩展指令，亦即RV64GC中<code>C</code>表示的压缩指令。很明显差个压缩指令后nop的长度就不一样了。</li></ul><p>这两个option可以保证nop指令正确的被插入到对应位置上。同时我们看到，nop指令所位于的地址被标记了一个label 1。随后这段内联汇编进行了另一件事情：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt>1
+</code></pre></td></tr></table>
+</div>
+</div><p><code>.option push</code>与<code>.option pop</code>是通用的，不赘述。<code>norelax</code>和<code>norvc</code>两个是RISC-V特定的option，其语义分别为：</p>
+<ul>
+<li>禁止汇编器和链接器对其进行relax操作，即在汇编和链接时更改指令顺序，进行优化</li>
+<li>禁止汇编器和链接器生成compression扩展指令，亦即RV64GC中<code>C</code>表示的压缩指令。很明显差个压缩指令后nop的长度就不一样了。</li>
+</ul>
+<p>这两个option可以保证nop指令正确的被插入到对应位置上。同时我们看到，nop指令所位于的地址被标记了一个label 1。随后这段内联汇编进行了另一件事情：</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt>1
 </span><span class=lnt>2
 </span><span class=lnt>3
 </span><span class=lnt>4
 </span><span class=lnt>5
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c>                <span class=s>&#34;       .pushsection    __jump_table, </span><span class=se>\&#34;</span><span class=s>aw</span><span class=se>\&#34;</span><span class=s>    </span><span class=se>\n\t</span><span class=s>&#34;</span>
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c>                <span class=s>&#34;       .pushsection    __jump_table, </span><span class=se>\&#34;</span><span class=s>aw</span><span class=se>\&#34;</span><span class=s>    </span><span class=se>\n\t</span><span class=s>&#34;</span>
                 <span class=s>&#34;       .align          &#34;</span> <span class=n>RISCV_LGPTR</span> <span class=s>&#34;         </span><span class=se>\n\t</span><span class=s>&#34;</span>
                 <span class=s>&#34;       .long           1b - ., %l[label] - .   </span><span class=se>\n\t</span><span class=s>&#34;</span>
                 <span class=s>&#34;       &#34;</span> <span class=n>RISCV_PTR</span> <span class=s>&#34;   %0 - .                  </span><span class=se>\n\t</span><span class=s>&#34;</span>
                 <span class=s>&#34;       .popsection                             </span><span class=se>\n\t</span><span class=s>&#34;</span>
-</code></pre></td></tr></table></div></div><p><code>.pushsection</code>告诉汇编器接下来生成的东西需要放到名为<code>__jump_table</code>的section中，&ldquo;aw"指allocatable与writable。而<code>.align RISCV_LGPTR</code>要求接下来的数据是指针对其的，RISCV_LGPTR在rv32上是2（4字节），在64位上是3（8字节）。随后通过<code>.long</code>插入了两个32位整数，分别为：</p><ul><li>前面label 1的地址减去当前地址，即这个整数位于的地址</li><li>后面C label位于的地址减去当前地址，即这个整数位于的地址</li></ul><p>最后，定义了一个指针，指针的值为函数参数<code>struct static_key *key</code>的值加上<code>branch</code>参数的值（true为1，false为0）后，减去当前地址的值。有关名为<code>__jump_label</code>的section分析在接下来进行，现在我们有了足够的理解来分析<code>static key</code>的API，即<code>static_key_likely</code>宏。</p><p>对于<code>static_key_likely</code>宏，我们需要根据初始条件来决定生成一个什么样的branch结构。对于定义为<code>struct static_key_true</code>的<code>static key</code>，我们知道其初始是true的，且它很有可能一直为true。因此，应该直接使用<code>arch_static_branch</code>生成填充为nop的branch，然后直接返回<code>!arch_static_branch()</code>，因为<code>static_key_likely(true)</code>的返回值应该为true，而<code>arch_static_branch</code>在不跳转的情况下返回值为false。</p><p>反之，对于定义为<code>struct static_key_false</code>的<code>static key</code>，其初始值为false，且很有可能以后一直是true的。因此我们应该调用<code>arch_static_branch_jump</code>生成一个已经填充为jmp指令的branch结构。后续key状态改变，且发生live patch后，这个branch又回到了nop状态，与true对应，此时执行最为高效。</p><p>用同样方法可以推导出<code>static_key_unlikely</code>的实现，关键以下几点：</p><ul><li><code>static_key_{likely,unlikely}</code>的返回值是什么（默认情况下，即live patch前的）</li><li><code>arch_static_branch{,_jump}</code>的返回值是什么（默认情况下，即live patch前的）</li></ul><p>前面看到<code>arch_static_branch</code>与<code>arch_static_branch_jump</code>往<code>__jump_label</code>段中填充了数据。实际上，这三个数据在内核中通过<code>struct jump_entry</code>表示：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt>1
+</code></pre></td></tr></table>
+</div>
+</div><p><code>.pushsection</code>告诉汇编器接下来生成的东西需要放到名为<code>__jump_table</code>的section中，&ldquo;aw"指allocatable与writable。而<code>.align RISCV_LGPTR</code>要求接下来的数据是指针对其的，RISCV_LGPTR在rv32上是2（4字节），在64位上是3（8字节）。随后通过<code>.long</code>插入了两个32位整数，分别为：</p>
+<ul>
+<li>前面label 1的地址减去当前地址，即这个整数位于的地址</li>
+<li>后面C label位于的地址减去当前地址，即这个整数位于的地址</li>
+</ul>
+<p>最后，定义了一个指针，指针的值为函数参数<code>struct static_key *key</code>的值加上<code>branch</code>参数的值（true为1，false为0）后，减去当前地址的值。有关名为<code>__jump_label</code>的section分析在接下来进行，现在我们有了足够的理解来分析<code>static key</code>的API，即<code>static_key_likely</code>宏。</p>
+<p>对于<code>static_key_likely</code>宏，我们需要根据初始条件来决定生成一个什么样的branch结构。对于定义为<code>struct static_key_true</code>的<code>static key</code>，我们知道其初始是true的，且它很有可能一直为true。因此，应该直接使用<code>arch_static_branch</code>生成填充为nop的branch，然后直接返回<code>!arch_static_branch()</code>，因为<code>static_key_likely(true)</code>的返回值应该为true，而<code>arch_static_branch</code>在不跳转的情况下返回值为false。</p>
+<p>反之，对于定义为<code>struct static_key_false</code>的<code>static key</code>，其初始值为false，且很有可能以后一直是true的。因此我们应该调用<code>arch_static_branch_jump</code>生成一个已经填充为jmp指令的branch结构。后续key状态改变，且发生live patch后，这个branch又回到了nop状态，与true对应，此时执行最为高效。</p>
+<p>用同样方法可以推导出<code>static_key_unlikely</code>的实现，关键以下几点：</p>
+<ul>
+<li><code>static_key_{likely,unlikely}</code>的返回值是什么（默认情况下，即live patch前的）</li>
+<li><code>arch_static_branch{,_jump}</code>的返回值是什么（默认情况下，即live patch前的）</li>
+</ul>
+<p>前面看到<code>arch_static_branch</code>与<code>arch_static_branch_jump</code>往<code>__jump_label</code>段中填充了数据。实际上，这三个数据在内核中通过<code>struct jump_entry</code>表示：</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt>1
 </span><span class=lnt>2
 </span><span class=lnt>3
 </span><span class=lnt>4
 </span><span class=lnt>5
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c><span class=k>struct</span> <span class=n>jump_entry</span> <span class=p>{</span>
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=k>struct</span> <span class=n>jump_entry</span> <span class=p>{</span>
         <span class=n>s32</span> <span class=n>code</span><span class=p>;</span>
         <span class=n>s32</span> <span class=n>target</span><span class=p>;</span>
         <span class=kt>long</span> <span class=n>key</span><span class=p>;</span>       <span class=c1>// key may be far away from the core kernel under KASLR
 </span><span class=c1></span><span class=p>};</span>
-</code></pre></td></tr></table></div></div><p>对于生成PIC代码的架构，可以定义<code>CONFIG_HAVE_ARCH_JUMP_LABEL_RELATIVE</code>，此时<code>struct jump_entry</code>就是上面的定义。否则，架构应该自行定义<code>struct jump_entry</code>，并使用绝对地址来保存上面几个值。这几个值实际上可以通过取自身的地址，并加上这个值本身（即偏移量）来还原，举例如下：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
+</code></pre></td></tr></table>
+</div>
+</div><p>对于生成PIC代码的架构，可以定义<code>CONFIG_HAVE_ARCH_JUMP_LABEL_RELATIVE</code>，此时<code>struct jump_entry</code>就是上面的定义。否则，架构应该自行定义<code>struct jump_entry</code>，并使用绝对地址来保存上面几个值。这几个值实际上可以通过取自身的地址，并加上这个值本身（即偏移量）来还原，举例如下：</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt> 1
 </span><span class=lnt> 2
 </span><span class=lnt> 3
 </span><span class=lnt> 4
@@ -213,7 +454,9 @@
 </span><span class=lnt> 9
 </span><span class=lnt>10
 </span><span class=lnt>11
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c><span class=k>static</span> <span class=kr>inline</span> <span class=kt>unsigned</span> <span class=kt>long</span> <span class=nf>jump_entry_code</span><span class=p>(</span><span class=k>const</span> <span class=k>struct</span> <span class=n>jump_entry</span> <span class=o>*</span><span class=n>entry</span><span class=p>)</span>
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=k>static</span> <span class=kr>inline</span> <span class=kt>unsigned</span> <span class=kt>long</span> <span class=nf>jump_entry_code</span><span class=p>(</span><span class=k>const</span> <span class=k>struct</span> <span class=n>jump_entry</span> <span class=o>*</span><span class=n>entry</span><span class=p>)</span>
 <span class=p>{</span>
         <span class=k>return</span> <span class=p>(</span><span class=kt>unsigned</span> <span class=kt>long</span><span class=p>)</span><span class=o>&amp;</span><span class=n>entry</span><span class=o>-&gt;</span><span class=n>code</span> <span class=o>+</span> <span class=n>entry</span><span class=o>-&gt;</span><span class=n>code</span><span class=p>;</span>
 <span class=p>}</span>
@@ -224,7 +467,22 @@
 
         <span class=k>return</span> <span class=p>(</span><span class=k>struct</span> <span class=n>static_key</span> <span class=o>*</span><span class=p>)((</span><span class=kt>unsigned</span> <span class=kt>long</span><span class=p>)</span><span class=o>&amp;</span><span class=n>entry</span><span class=o>-&gt;</span><span class=n>key</span> <span class=o>+</span> <span class=n>offset</span><span class=p>);</span>
 <span class=p>}</span>
-</code></pre></td></tr></table></div></div><p>很明显，<code>struct jump_entry</code>是对一个已经插入内核代码段的分支的描述，记录了一些基本信息。</p><h2 id=核心状态逻辑>核心状态逻辑</h2><p>理解这一套机制的核心就是理解它的状态逻辑，毕竟原理相当简单，很容易就陷入了自以为明白的情况中。通过阅读代码，我总结了如下重点，可以快速理解核心状态逻辑：</p><ul><li>一定要明确<code>struct static_key</code>和<code>struct jump_entry</code>的关系。<code>struct static_key</code>是对我们想要的布尔变量的抽象，即取代原先<code>if</code>语句中的条件变量。<code>struct jump_entry</code>则是对生成分支的抽象，记录我们生成的特定分支的信息，这个信息放置于一个名为<code>__jump_label</code>的section中。注意真正生成的分支已经插到各种text段中了。</li><li><code>struct jump_entry</code>，记录了一个分支的信息，便于我们后续追踪。包括分支处于的位置，分支是unlikely还是likely的，分支对应于哪一个<code>struct static_key</code>，后面还会看到<code>struct jump_entry</code>还记录了分支是否位于<code>__init</code>段中。</li><li><code>struct static_key</code>记录了这个抽象布尔变量的值（counter形式，类似于preempt_enable等API，可以以类似栈的形式enable或者disable这个key）。还实现对所有与它关联的<code>struct jump_entry</code>的反向引用，以及这个<code>struct static_key</code>的初始状态，即初始为true还是初始为false。</li><li>而真正位于<code>text</code>段上分支的状态只有一种，我们称其为分支填充状态，只有nop和jump两种情况。nop状态下，live patch点上写的是nop，分支会直接执行in-line的代码，反之，live patch点上填充的是一个jump语句，使得CPU在执行到这里时跳转到out-of-line的代码上。</li><li>分支的填充状态由<code>struct static_key</code>和<code>struct jump_entry</code>共同encode。简单来说，当前分支的填充状态可以通过如下表达式进行计算：<code>（likely/unlikely）^ (true/false)</code>。举例来说，对于一个likely的jump entry（即它有大概率为true），那么当这个key为true时，它一定是nop状态的。这是由于这套系统就是这么设计的，上述表达式实质上就是我们想要的结果，即一个likely true的分支，在key为true时，一定应该设置成最高效的nop状态。<code>static_key_likely</code>和<code>static_key_unlikely</code>实际上就是根据这个表达式设计的，根据这个表达式生成分支，以获取最优的性能。这个表达式本质上就是jump label设计的核心逻辑。让likely和unlikely的分支在命中时处于最高效的形式中。</li></ul><p>状态解码相关的实现举例如下：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt>1
+</code></pre></td></tr></table>
+</div>
+</div><p>很明显，<code>struct jump_entry</code>是对一个已经插入内核代码段的分支的描述，记录了一些基本信息。</p>
+<h2 id=核心状态逻辑>核心状态逻辑</h2>
+<p>理解这一套机制的核心就是理解它的状态逻辑，毕竟原理相当简单，很容易就陷入了自以为明白的情况中。通过阅读代码，我总结了如下重点，可以快速理解核心状态逻辑：</p>
+<ul>
+<li>一定要明确<code>struct static_key</code>和<code>struct jump_entry</code>的关系。<code>struct static_key</code>是对我们想要的布尔变量的抽象，即取代原先<code>if</code>语句中的条件变量。<code>struct jump_entry</code>则是对生成分支的抽象，记录我们生成的特定分支的信息，这个信息放置于一个名为<code>__jump_label</code>的section中。注意真正生成的分支已经插到各种text段中了。</li>
+<li><code>struct jump_entry</code>，记录了一个分支的信息，便于我们后续追踪。包括分支处于的位置，分支是unlikely还是likely的，分支对应于哪一个<code>struct static_key</code>，后面还会看到<code>struct jump_entry</code>还记录了分支是否位于<code>__init</code>段中。</li>
+<li><code>struct static_key</code>记录了这个抽象布尔变量的值（counter形式，类似于preempt_enable等API，可以以类似栈的形式enable或者disable这个key）。还实现对所有与它关联的<code>struct jump_entry</code>的反向引用，以及这个<code>struct static_key</code>的初始状态，即初始为true还是初始为false。</li>
+<li>而真正位于<code>text</code>段上分支的状态只有一种，我们称其为分支填充状态，只有nop和jump两种情况。nop状态下，live patch点上写的是nop，分支会直接执行in-line的代码，反之，live patch点上填充的是一个jump语句，使得CPU在执行到这里时跳转到out-of-line的代码上。</li>
+<li>分支的填充状态由<code>struct static_key</code>和<code>struct jump_entry</code>共同encode。简单来说，当前分支的填充状态可以通过如下表达式进行计算：<code>（likely/unlikely）^ (true/false)</code>。举例来说，对于一个likely的jump entry（即它有大概率为true），那么当这个key为true时，它一定是nop状态的。这是由于这套系统就是这么设计的，上述表达式实质上就是我们想要的结果，即一个likely true的分支，在key为true时，一定应该设置成最高效的nop状态。<code>static_key_likely</code>和<code>static_key_unlikely</code>实际上就是根据这个表达式设计的，根据这个表达式生成分支，以获取最优的性能。这个表达式本质上就是jump label设计的核心逻辑。让likely和unlikely的分支在命中时处于最高效的形式中。</li>
+</ul>
+<p>状态解码相关的实现举例如下：</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt>1
 </span><span class=lnt>2
 </span><span class=lnt>3
 </span><span class=lnt>4
@@ -233,7 +491,9 @@
 </span><span class=lnt>7
 </span><span class=lnt>8
 </span><span class=lnt>9
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c><span class=k>static</span> <span class=k>enum</span> <span class=n>jump_label_type</span> <span class=nf>jump_label_type</span><span class=p>(</span><span class=k>struct</span> <span class=n>jump_entry</span> <span class=o>*</span><span class=n>entry</span><span class=p>)</span>
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=k>static</span> <span class=k>enum</span> <span class=n>jump_label_type</span> <span class=nf>jump_label_type</span><span class=p>(</span><span class=k>struct</span> <span class=n>jump_entry</span> <span class=o>*</span><span class=n>entry</span><span class=p>)</span>
 <span class=p>{</span>
         <span class=k>struct</span> <span class=n>static_key</span> <span class=o>*</span><span class=n>key</span> <span class=o>=</span> <span class=n>jump_entry_key</span><span class=p>(</span><span class=n>entry</span><span class=p>);</span>
         <span class=kt>bool</span> <span class=n>enabled</span> <span class=o>=</span> <span class=n>static_key_enabled</span><span class=p>(</span><span class=n>key</span><span class=p>);</span>
@@ -242,21 +502,49 @@
         <span class=cm>/* See the comment in linux/jump_label.h */</span>
         <span class=k>return</span> <span class=n>enabled</span> <span class=o>^</span> <span class=n>branch</span><span class=p>;</span>
 <span class=p>}</span>
-</code></pre></td></tr></table></div></div><h2 id=__jump_label段>__jump_label段</h2><p>我们注意到有如下定义：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt>1
+</code></pre></td></tr></table>
+</div>
+</div><h2 id=__jump_label段>__jump_label段</h2>
+<p>我们注意到有如下定义：</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt>1
 </span><span class=lnt>2
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c><span class=k>extern</span> <span class=k>struct</span> <span class=n>jump_entry</span> <span class=n>__start___jump_table</span><span class=p>[];</span>
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=k>extern</span> <span class=k>struct</span> <span class=n>jump_entry</span> <span class=n>__start___jump_table</span><span class=p>[];</span>
 <span class=k>extern</span> <span class=k>struct</span> <span class=n>jump_entry</span> <span class=n>__stop___jump_table</span><span class=p>[];</span>
-</code></pre></td></tr></table></div></div><p>同时从链接脚本中可以看到如下定义：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt>1
+</code></pre></td></tr></table>
+</div>
+</div><p>同时从链接脚本中可以看到如下定义：</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt>1
 </span><span class=lnt>2
 </span><span class=lnt>3
 </span><span class=lnt>4
 </span><span class=lnt>5
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c><span class=cp>#define JUMP_TABLE_DATA                                                 \
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=cp>#define JUMP_TABLE_DATA                                                 \
 </span><span class=cp>        . = ALIGN(8);                                                   \
 </span><span class=cp>        __start___jump_table = .;                                       \
 </span><span class=cp>        KEEP(*(__jump_table))                                           \
 </span><span class=cp>        __stop___jump_table = .;
-</span></code></pre></td></tr></table></div></div><p>也就是说，<code>__start___jump_table</code>是<code>__jump_table</code>段的开头。可以直接在内核中找到这个段是在哪里被处理的，即<code>jump_label_init</code>函数。</p><p><code>jump_label_init</code>被main函数调用，是在内核初始化过程中调用的比较早的。大概位置刚好就是内核打出<code>Command Line:</code> 那行日志后。函数首先讲整个section中的jump_entry根据key的值进行排序，排序过程是一个in-place的swap过程。经过排序后，<code>__jump_label</code>段中的元素就是<code>struct static_key</code>连续的了，即对应一个<code>struct static_key</code>的<code>struct jump_label</code>在段中是连续存在的了。随后，函数遍历<code>__jump_label</code>段中的所有元素，并进行如下操作：</p><ul><li>对所有初始化为nop形式的branch调用<code>arch_jump_label_transform_static</code>。RISC-V上该函数为空，按照我的理解，其他平台上如x86，可能采取先将nop填写为其他数据，随后通过初始化修改nop的行为。可能只特定于x86这种变长指令集，至少arm64下这个函数也是空的。</li><li>初始化<code>struct static_key</code>的<code>entries</code>字段，将其指向连续<code>struct jump_entry</code>的第一个元素。</li><li>对于所有位于<code>__init</code>段的branch，调用<code>jump_entry_set_init</code>函数。此举改变了<code>struct jump_entry</code>的标记，使得后续可以辨别一个<code>struct jump_entry</code>是否位于<code>__init</code>段中。</li></ul><h2 id=状态翻转>状态翻转</h2><p>状态翻转在更改<code>struct static_key</code>的状态时进行，简单来说，当我们想把一个key的状态从false设置为true的时候，需要将其对应的所有的<code>struct jump_entry</code>做live patch操作，翻转其的状态。我们以一个简单的API入口举例：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
+</span></code></pre></td></tr></table>
+</div>
+</div><p>也就是说，<code>__start___jump_table</code>是<code>__jump_table</code>段的开头。可以直接在内核中找到这个段是在哪里被处理的，即<code>jump_label_init</code>函数。</p>
+<p><code>jump_label_init</code>被main函数调用，是在内核初始化过程中调用的比较早的。大概位置刚好就是内核打出<code>Command Line:</code> 那行日志后。函数首先讲整个section中的jump_entry根据key的值进行排序，排序过程是一个in-place的swap过程。经过排序后，<code>__jump_label</code>段中的元素就是<code>struct static_key</code>连续的了，即对应一个<code>struct static_key</code>的<code>struct jump_label</code>在段中是连续存在的了。随后，函数遍历<code>__jump_label</code>段中的所有元素，并进行如下操作：</p>
+<ul>
+<li>对所有初始化为nop形式的branch调用<code>arch_jump_label_transform_static</code>。RISC-V上该函数为空，按照我的理解，其他平台上如x86，可能采取先将nop填写为其他数据，随后通过初始化修改nop的行为。可能只特定于x86这种变长指令集，至少arm64下这个函数也是空的。</li>
+<li>初始化<code>struct static_key</code>的<code>entries</code>字段，将其指向连续<code>struct jump_entry</code>的第一个元素。</li>
+<li>对于所有位于<code>__init</code>段的branch，调用<code>jump_entry_set_init</code>函数。此举改变了<code>struct jump_entry</code>的标记，使得后续可以辨别一个<code>struct jump_entry</code>是否位于<code>__init</code>段中。</li>
+</ul>
+<h2 id=状态翻转>状态翻转</h2>
+<p>状态翻转在更改<code>struct static_key</code>的状态时进行，简单来说，当我们想把一个key的状态从false设置为true的时候，需要将其对应的所有的<code>struct jump_entry</code>做live patch操作，翻转其的状态。我们以一个简单的API入口举例：</p>
+<div class=highlight><div class=chroma>
+<table class=lntable><tr><td class=lntd>
+<pre tabindex=0 class=chroma><code><span class=lnt> 1
 </span><span class=lnt> 2
 </span><span class=lnt> 3
 </span><span class=lnt> 4
@@ -286,7 +574,9 @@
 </span><span class=lnt>28
 </span><span class=lnt>29
 </span><span class=lnt>30
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-c data-lang=c><span class=kt>void</span> <span class=nf>static_key_enable_cpuslocked</span><span class=p>(</span><span class=k>struct</span> <span class=n>static_key</span> <span class=o>*</span><span class=n>key</span><span class=p>)</span>
+</span></code></pre></td>
+<td class=lntd>
+<pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=kt>void</span> <span class=nf>static_key_enable_cpuslocked</span><span class=p>(</span><span class=k>struct</span> <span class=n>static_key</span> <span class=o>*</span><span class=n>key</span><span class=p>)</span>
 <span class=p>{</span>
         <span class=n>STATIC_KEY_CHECK_USE</span><span class=p>(</span><span class=n>key</span><span class=p>);</span>
         <span class=n>lockdep_assert_cpus_held</span><span class=p>();</span>
@@ -316,18 +606,77 @@
         <span class=n>cpus_read_unlock</span><span class=p>();</span>
 <span class=p>}</span>
 <span class=n>EXPORT_SYMBOL_GPL</span><span class=p>(</span><span class=n>static_key_enable</span><span class=p>);</span>
-</code></pre></td></tr></table></div></div><p>本质上，函数根据<code>jump_label_can_update</code>函数确定一个<code>struct jump_entry</code>是否可以live patch。一般情况下只有<code>__init</code>段中的代码无法live patch。确认完成后，使用架构相关的<code>arch_jump_label_transform</code>将一个<code>struct jump_entry</code>进行live patch操作。对于RISC-V平台，由于指令是定长的，仅仅是根据<code>jump_entry_target</code>生成jump指令，或者简单使用nop对特定位置的u32进行更新而已。注意，这个更新需要刷新icache，invalidate特定的地址区域，否则无法立即生效。</p></div><div class=post-copyright><p class=copyright-item><span class=item-title>文章作者</span>
-<span class=item-content>crab2313</span></p><p class=copyright-item><span class=item-title>上次更新</span>
-<span class=item-content>2021-06-11
-<a href=https://github.com/crab2313/blog-doc/commit/69e147af26680c8fc459779afe2ee60ff1e9c68c title="blog: small typo fix of static-key">(69e147a)</a></span></p></div><footer class=post-footer><div class=post-tags><a href=/tags/kernel/>kernel</a></div><nav class=post-nav><a class=prev href=/post/kernel-module/><i class="iconfont icon-left"></i>
+</code></pre></td></tr></table>
+</div>
+</div><p>本质上，函数根据<code>jump_label_can_update</code>函数确定一个<code>struct jump_entry</code>是否可以live patch。一般情况下只有<code>__init</code>段中的代码无法live patch。确认完成后，使用架构相关的<code>arch_jump_label_transform</code>将一个<code>struct jump_entry</code>进行live patch操作。对于RISC-V平台，由于指令是定长的，仅仅是根据<code>jump_entry_target</code>生成jump指令，或者简单使用nop对特定位置的u32进行更新而已。注意，这个更新需要刷新icache，invalidate特定的地址区域，否则无法立即生效。</p>
+</div>
+<div class=post-copyright>
+<p class=copyright-item>
+<span class=item-title>文章作者</span>
+<span class=item-content>crab2313</span>
+</p>
+<p class=copyright-item>
+<span class=item-title>上次更新</span>
+<span class=item-content>
+2021-06-11
+<a href=https://github.com/crab2313/blog-doc/commit/69e147af26680c8fc459779afe2ee60ff1e9c68c title="blog: small typo fix of static-key">(69e147a)</a>
+</span>
+</p>
+</div>
+<footer class=post-footer>
+<div class=post-tags>
+<a href=/tags/kernel/>kernel</a>
+</div>
+<nav class=post-nav>
+<a class=prev href=/post/kernel-module/>
+<i class="iconfont icon-left"></i>
 <span class="prev-text nav-default">Linux在RISC-V平台下的模块实现</span>
-<span class="prev-text nav-mobile">上一篇</span></a>
-<a class=next href=/post/riscv-spinlock/><span class="next-text nav-default">Linux内核在RISC-V架构下的spinlock实现</span>
+<span class="prev-text nav-mobile">上一篇</span>
+</a>
+<a class=next href=/post/riscv-spinlock/>
+<span class="next-text nav-default">Linux内核在RISC-V架构下的spinlock实现</span>
 <span class="next-text nav-mobile">下一篇</span>
-<i class="iconfont icon-right"></i></a></nav></footer></article></div></div></main><footer id=footer class=footer><div class=social-links><a href=mailto:crab2313@gmail.com class="iconfont icon-email" title=email></a><a href=https://github.com/crab2313 class="iconfont icon-github" title=github></a><a href=https://gitlab.com/crab2313 class="iconfont icon-gitlab" title=gitlab></a><a href=https://space.bilibili.com/1310103 class="iconfont icon-bilibili" title=bilibili></a><a href=/index.xml type=application/rss+xml class="iconfont icon-rss" title=rss></a></div><div class=copyright><span class=power-by>由 <a class=hexo-link href=https://gohugo.io>Hugo</a> 强力驱动</span>
+<i class="iconfont icon-right"></i>
+</a>
+</nav>
+</footer>
+</article>
+</div>
+</div>
+</main>
+<footer id=footer class=footer>
+<div class=social-links>
+<a href=mailto:crab2313@gmail.com class="iconfont icon-email" title=email></a>
+<a href=https://github.com/crab2313 class="iconfont icon-github" title=github></a>
+<a href=https://gitlab.com/crab2313 class="iconfont icon-gitlab" title=gitlab></a>
+<a href=https://space.bilibili.com/1310103 class="iconfont icon-bilibili" title=bilibili></a>
+<a href=/index.xml type=application/rss+xml class="iconfont icon-rss" title=rss></a>
+</div>
+<div class=copyright>
+<span class=power-by>
+由 <a class=hexo-link href=https://gohugo.io>Hugo</a> 强力驱动
+</span>
 <span class=division>|</span>
-<span class=theme-info>主题 -
-<a class=theme-link href=https://github.com/olOwOlo/hugo-theme-even>Even</a></span>
-<span class=copyright-year>&copy;
+<span class=theme-info>
+主题 -
+<a class=theme-link href=https://github.com/olOwOlo/hugo-theme-even>Even</a>
+</span>
+<span class=copyright-year>
+&copy;
 2017 -
-2021<span class=heart><i class="iconfont icon-heart"></i></span><span>crab2313</span></span></div></footer><div class=back-to-top id=back-to-top><i class="iconfont icon-up"></i></div></div><script src=https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin=anonymous></script><script src=https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin=anonymous></script><script src=https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin=anonymous></script><script type=text/javascript src=/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js></script><script type=text/javascript>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']]}}</script><script async src=https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin=anonymous></script></body></html>
+2021<span class=heart><i class="iconfont icon-heart"></i></span><span>crab2313</span>
+</span>
+</div>
+</footer>
+<div class=back-to-top id=back-to-top>
+<i class="iconfont icon-up"></i>
+</div>
+</div>
+<script src=https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin=anonymous></script>
+<script src=https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin=anonymous></script>
+<script src=https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin=anonymous></script>
+<script type=text/javascript src=/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js></script>
+<script type=text/javascript>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']]}}</script>
+<script async src=https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin=anonymous></script>
+</body>
+</html>
