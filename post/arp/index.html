@@ -12,7 +12,7 @@
 <meta name=apple-mobile-web-app-capable content="yes">
 <meta name=apple-mobile-web-app-status-bar-style content="#f8f5ec">
 <meta name=author content="crab2313"><meta name=description content="本文对内核中ARP协议相关的事件进行分析。本文是原先分析文档的整理，后续会进行相应复习与补足。 初始化 1 2 3 4 5 6 7 8 9 10 11 void __init arp_init(void) { neigh_table_init(NEIGH_ARP_TABLE, &amp;amp;arp_tbl); dev_add_pack(&amp;amp;arp_packet_type); arp_proc_init(); #ifdef"><meta name=keywords content="blog,kernel">
-<meta name=generator content="Hugo 0.89.2 with theme even">
+<meta name=generator content="Hugo 0.92.0 with theme even">
 <link rel=canonical href=/post/arp/>
 <link rel=apple-touch-icon sizes=180x180 href=/apple-touch-icon.png>
 <link rel=icon type=image/png sizes=32x32 href=/favicon-32x32.png>
@@ -656,7 +656,7 @@
 <span class=copyright-year>
 &copy;
 2017 -
-2021<span class=heart><i class="iconfont icon-heart"></i></span><span>crab2313</span>
+2022<span class=heart><i class="iconfont icon-heart"></i></span><span>crab2313</span>
 </span>
 </div>
 </footer>
