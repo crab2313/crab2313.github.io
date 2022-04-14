@@ -1,267 +1,41 @@
-<!doctype html><html lang=zh-cn>
-<head>
-<meta charset=utf-8>
-<meta http-equiv=x-ua-compatible content="IE=edge,chrome=1">
-<title>DRM框架分析（三）：显存管理 - crab2313's blog</title>
-<meta name=renderer content="webkit">
-<meta name=viewport content="width=device-width,initial-scale=1,maximum-scale=1">
-<meta http-equiv=cache-control content="no-transform">
-<meta http-equiv=cache-control content="no-siteapp">
-<meta name=theme-color content="#f8f5ec">
-<meta name=msapplication-navbutton-color content="#f8f5ec">
-<meta name=apple-mobile-web-app-capable content="yes">
-<meta name=apple-mobile-web-app-status-bar-style content="#f8f5ec">
-<meta name=author content="crab2313"><meta name=description content="GEM GEM与TTM之间的关系 TTM是内核最初的DRM显存管理器，其设计思想是试图为所有的显卡驱动提供一个公共的API。TTM后面被认为是失败的"><meta name=keywords content="blog,kernel">
-<meta name=generator content="Hugo 0.92.0 with theme even">
-<link rel=canonical href=/post/drm-vram/>
-<link rel=apple-touch-icon sizes=180x180 href=/apple-touch-icon.png>
-<link rel=icon type=image/png sizes=32x32 href=/favicon-32x32.png>
-<link rel=icon type=image/png sizes=16x16 href=/favicon-16x16.png>
-<link rel=manifest href=/manifest.json>
-<link rel=mask-icon href=/safari-pinned-tab.svg color=#5bbad5>
-<link href=/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css rel=stylesheet>
-<link rel=stylesheet href=https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin=anonymous>
-<meta property="og:title" content="DRM框架分析（三）：显存管理">
-<meta property="og:description" content="GEM GEM与TTM之间的关系 TTM是内核最初的DRM显存管理器，其设计思想是试图为所有的显卡驱动提供一个公共的API。TTM后面被认为是失败的">
-<meta property="og:type" content="article">
-<meta property="og:url" content="/post/drm-vram/"><meta property="article:section" content="post">
-<meta property="article:published_time" content="2021-03-28T00:00:00+00:00">
-<meta property="article:modified_time" content="2021-04-01T14:57:04+08:00">
-<meta itemprop=name content="DRM框架分析（三）：显存管理">
-<meta itemprop=description content="GEM GEM与TTM之间的关系 TTM是内核最初的DRM显存管理器，其设计思想是试图为所有的显卡驱动提供一个公共的API。TTM后面被认为是失败的"><meta itemprop=datePublished content="2021-03-28T00:00:00+00:00">
-<meta itemprop=dateModified content="2021-04-01T14:57:04+08:00">
-<meta itemprop=wordCount content="2848">
-<meta itemprop=keywords content="kernel,drm,"><meta name=twitter:card content="summary">
-<meta name=twitter:title content="DRM框架分析（三）：显存管理">
-<meta name=twitter:description content="GEM GEM与TTM之间的关系 TTM是内核最初的DRM显存管理器，其设计思想是试图为所有的显卡驱动提供一个公共的API。TTM后面被认为是失败的"><!--[if lte IE 9]><script src=https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js></script><![endif]--><!--[if lt IE 9]><script src=https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js></script>
-<script src=https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js></script><![endif]-->
-</head>
-<body>
-<div id=mobile-navbar class=mobile-navbar>
-<div class=mobile-header-logo>
-<a href=/ class=logo>crab2313's blog</a>
-</div>
-<div class=mobile-navbar-icon>
+<!doctype html><html lang=zh-cn><head><meta charset=utf-8><meta http-equiv=x-ua-compatible content="IE=edge,chrome=1"><title>DRM框架分析（三）：显存管理 - crab2313's blog</title><meta name=renderer content="webkit"><meta name=viewport content="width=device-width,initial-scale=1,maximum-scale=1"><meta http-equiv=cache-control content="no-transform"><meta http-equiv=cache-control content="no-siteapp"><meta name=theme-color content="#f8f5ec"><meta name=msapplication-navbutton-color content="#f8f5ec"><meta name=apple-mobile-web-app-capable content="yes"><meta name=apple-mobile-web-app-status-bar-style content="#f8f5ec"><meta name=author content="crab2313"><meta name=description content="GEM GEM与TTM之间的关系 TTM是内核最初的DRM显存管理器，其设计思想是试图为所有的显卡驱动提供一个公共的API。TTM后面被认为是失败的"><meta name=keywords content="blog,kernel"><meta name=generator content="Hugo 0.96.0 with theme even"><link rel=canonical href=/post/drm-vram/><link rel=apple-touch-icon sizes=180x180 href=/apple-touch-icon.png><link rel=icon type=image/png sizes=32x32 href=/favicon-32x32.png><link rel=icon type=image/png sizes=16x16 href=/favicon-16x16.png><link rel=manifest href=/manifest.json><link rel=mask-icon href=/safari-pinned-tab.svg color=#5bbad5><link href=/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css rel=stylesheet><link rel=stylesheet href=https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin=anonymous><meta property="og:title" content="DRM框架分析（三）：显存管理"><meta property="og:description" content="GEM GEM与TTM之间的关系 TTM是内核最初的DRM显存管理器，其设计思想是试图为所有的显卡驱动提供一个公共的API。TTM后面被认为是失败的"><meta property="og:type" content="article"><meta property="og:url" content="/post/drm-vram/"><meta property="article:section" content="post"><meta property="article:published_time" content="2021-03-28T00:00:00+00:00"><meta property="article:modified_time" content="2021-04-01T14:57:04+08:00"><meta itemprop=name content="DRM框架分析（三）：显存管理"><meta itemprop=description content="GEM GEM与TTM之间的关系 TTM是内核最初的DRM显存管理器，其设计思想是试图为所有的显卡驱动提供一个公共的API。TTM后面被认为是失败的"><meta itemprop=datePublished content="2021-03-28T00:00:00+00:00"><meta itemprop=dateModified content="2021-04-01T14:57:04+08:00"><meta itemprop=wordCount content="2848"><meta itemprop=keywords content="kernel,drm,"><meta name=twitter:card content="summary"><meta name=twitter:title content="DRM框架分析（三）：显存管理"><meta name=twitter:description content="GEM GEM与TTM之间的关系 TTM是内核最初的DRM显存管理器，其设计思想是试图为所有的显卡驱动提供一个公共的API。TTM后面被认为是失败的"><!--[if lte IE 9]><script src=https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js></script><![endif]--><!--[if lt IE 9]><script src=https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js></script>
+<script src=https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js></script><![endif]--></head><body><div id=mobile-navbar class=mobile-navbar><div class=mobile-header-logo><a href=/ class=logo>crab2313's blog</a></div><div class=mobile-navbar-icon><span></span>
 <span></span>
-<span></span>
-<span></span>
-</div>
-</div>
-<nav id=mobile-menu class="mobile-menu slideout-menu">
-<ul class=mobile-menu-list>
-<a href=/>
-<li class=mobile-menu-item>Home</li>
-</a><a href=/post/>
-<li class=mobile-menu-item>Archives</li>
-</a><a href=/tags/>
-<li class=mobile-menu-item>Tags</li>
-</a><a href=/categories/>
-<li class=mobile-menu-item>Categories</li>
-</a>
-</ul>
-</nav>
-<div class=container id=mobile-panel>
-<header id=header class=header>
-<div class=logo-wrapper>
-<a href=/ class=logo>crab2313's blog</a>
-</div>
-<nav class=site-navbar>
-<ul id=menu class=menu>
-<li class=menu-item>
-<a class=menu-item-link href=/>Home</a>
-</li><li class=menu-item>
-<a class=menu-item-link href=/post/>Archives</a>
-</li><li class=menu-item>
-<a class=menu-item-link href=/tags/>Tags</a>
-</li><li class=menu-item>
-<a class=menu-item-link href=/categories/>Categories</a>
-</li>
-</ul>
-</nav>
-</header>
-<main id=main class=main>
-<div class=content-wrapper>
-<div id=content class=content>
-<article class=post>
-<header class=post-header>
-<h1 class=post-title>DRM框架分析（三）：显存管理</h1>
-<div class=post-meta>
-<span class=post-time> 2021-03-28 </span>
-</div>
-</header>
-<div class=post-toc id=post-toc>
-<h2 class=post-toc-title>文章目录</h2>
-<div class=post-toc-content>
-<nav id=TableOfContents>
-<ul>
-<li>
-<ul>
-<li><a href=#gem>GEM</a>
-<ul>
-<li><a href=#gem与ttm之间的关系>GEM与TTM之间的关系</a></li>
-<li><a href=#框架初始化>框架初始化</a></li>
-<li><a href=#handle与name>handle与name</a></li>
-<li><a href=#drm_gem_object>drm_gem_object</a></li>
-<li><a href=#用户态映射>用户态映射</a></li>
-</ul>
-</li>
-<li><a href=#dumb>DUMB</a></li>
-<li><a href=#gbm>GBM</a>
-<ul>
-<li><a href=#note>Note</a></li>
-<li><a href=#gbm_device>gbm_device</a></li>
-<li><a href=#gbm_bo>gbm_bo</a></li>
-</ul>
-</li>
-</ul>
-</li>
-</ul>
-</nav>
-</div>
-</div>
-<div class=post-content>
-<h2 id=gem>GEM</h2>
-<h3 id=gem与ttm之间的关系>GEM与TTM之间的关系</h3>
-<p>TTM是内核最初的DRM显存管理器，其设计思想是试图为所有的显卡驱动提供一个公共的API。TTM后面被认为是失败的，其API与实现复杂不可控，没有人愿意用他。后来intel吸取教训，设计了GEM，其设计较为灵活，只提供基本的实现，部分功能需要驱动程序通过驱动自定的接口进行扩展。GEM与TTM在特性上的主要区别为GEM不支持管理独立显存，只支持UMA，而TTM两种都支持。目前的DRM驱动程序中，基本都使用GEM作为前端为用户态提供接口，而涉及到管理独立显存的时候，则借助TTM作为后端实现管理功能。</p>
-<h3 id=框架初始化>框架初始化</h3>
-<p>驱动程序可以自己选择是否使用GEM框架，如果选择使用，则需要在注册<code>drm_driver</code>到DRM core中时，在<code>driver_features</code>里设置DRIVER_GEM标志。在驱动加载时，DRM框架会自动初始化GEM。</p>
-<h3 id=handle与name>handle与name</h3>
-<p>handle是gem_object的引用，其作用域被限制在drm文件描述符内，用于用户态程序引用内核态的drm_gem_object。当drm文件描述符被关闭时，所有的handle都会被关闭。而name则是drm_gem_object的名称，为一个32-bit整数。name的作用域是全局的，因此被直接保存在drm_gem_object内。默认情况下drm_gem_object的name都为0，表示其是未命名的。用户态可以通过FLINK为drm_gem_object命名，之后系统内的其他进程可以通过对应的name对该drm_gem_object进行访问。</p>
-<p>handle的创建是创建GEM对象的一个步骤。目前GEM对象的创建一般是通过设备相关的API进行实现的，驱动程序可以通过<code>drm_gem_handle_create</code>函数从对应drm文件中创建一个handle返回给用于态。关于handle，gem core中还提供了<code>drm_gem_handle_delete</code>和<code>drm_gem_handle_lookup</code>函数。事实上，handle的管理是通过idr实现的。</p>
-<h3 id=drm_gem_object>drm_gem_object</h3>
-<p>该对象是GEM内存管理的核心。GEM目前提供的功能是不完全的，部分空缺需要驱动自行填补，因此GEM框架要求驱动在<code>drm_gem_object</code>的基础上实现自己的GEM对象。这个操作实际上就是将<code>drm_gem_object</code>嵌入到驱动自己定义的<code>{driver}_gem_object</code>中。<code>drm_gem_object</code>定义在<code>include/drm/drm_gem.h</code>中，且有详细的注释，这里不再赘述，重点分析一些字段。</p>
-<p><code>filp</code>是一个指向<code>struct file</code>的指针，要理解它的作用就必须理解真正的内存是如何分配的。前面提到了GEM只支持UMA，即显卡使用RAM做为显存，这就又涉及到了两种情况。在PC中由于IOMMU的存在，显卡并不强制要求连续的物理内存，因此GEM可以使用SHMFS做为存储后端，此时filp指针就指向对应的文件描述符。而在嵌入式应用场景下，大部分设备没有IOMMU，因此必须要求连续的物理内存，此时filp为NULL，驱动通过CMA申请到连续的物理内存用作存储后端。注意，GEM框架并不负责管理存储后端，只提供了一些基本的helper，而存储的分配与释放完全由驱动程序控制。</p>
-<p>TODO： 研究一下SHMFS</p>
-<p><code>vma_node</code>简单来说是保存了这个object的mmap偏移量。这里又需要提及<code>drm_gem_object</code>向用户态的映射问题。GEM目前基本上是通过两种方式实现MAP gem_object到用户态的：设备相关IOCTL和基于drm文件描述符的mmap。后者通过一个虚拟的偏移量确定mmap究竟在映射哪一个<code>drm_gem_object</code>。该机制的实现细节需要单独讨论。</p>
-<p><code>dma_buf</code>字段是一个<code>struct dma_buf</code>类型的字段。这里又设计drm-prime框架的细节了。简单来说，通过name来实现进程间共享<code>drm_gem_object</code>存在显而易见的安全性问题，毕竟name是全局的。攻击者可以通过特定的pattern推测或者枚举<code>drm_gem_object</code>的name，达到窃取数据的目的。后续GEM集成了dma_buf，可以通过dma_buf实现共享。</p>
-<h3 id=用户态映射>用户态映射</h3>
-<p>用户态映射实质上就是将<code>drm_gem_object</code>描述的存储空间映射到用户态进程的虚拟地址空间，让用户态进程可以随机读写。正如前面提到的，这里只分析GEM提供的方式，即基于drm文件描述符的mmap。我们知道mmap系统调用的原型如下：</p>
-<div class=highlight><div class=chroma>
-<table class=lntable><tr><td class=lntd>
-<pre tabindex=0 class=chroma><code><span class=lnt>1
-</span></code></pre></td>
-<td class=lntd>
-<pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=kt>void</span> <span class=o>*</span><span class=nf>mmap</span><span class=p>(</span><span class=kt>void</span> <span class=o>*</span><span class=n>addr</span><span class=p>,</span> <span class=n>size_t</span> <span class=n>length</span><span class=p>,</span> <span class=kt>int</span> <span class=n>prot</span><span class=p>,</span> <span class=kt>int</span> <span class=n>flags</span><span class=p>,</span> <span class=kt>int</span> <span class=n>fd</span><span class=p>,</span> <span class=n>off_t</span> <span class=n>offset</span><span class=p>);</span> 
-</code></pre></td></tr></table>
-</div>
-</div><p>GEM框架可以为每一个<code>drm_gem_object</code>绑定一个特定虚拟offset，通过offset辨别需要映射到用户态的<code>drm_gem_object</code>。该机制需要drm文件描述符与<code>drm_gem_object</code>的共同协作，前面看到<code>drm_gem_object</code>中提供了vma_node用于保存该信息，驱动程序需要自行调用<code>drm_gem_create_mmap_offset</code>为一个<code>drm_gem_object</code>注册一个虚拟offset。虚拟offset需要通过设备相关的IOCTL传递给用户态。<code>drm_device</code>中存在vma_offset_manager用于统一管理mmap的虚拟offset，其后端基本上为drm_mm与红黑树缓存的组合。</p>
-<h2 id=dumb>DUMB</h2>
-<p>(TODO)</p>
-<h2 id=gbm>GBM</h2>
-<p>前面看到基于GEM的驱动对外是没有提供统一的内存管理接口的，至少Buffer Object创建销毁等操作是需要自行提供设备相关的即口进行实现的。用户态没有统一的接口对缓冲区进行管理，这导致某些特定用户态程序的开发的困难，如wayland compositor。MESA项目提供了libgbm，抽象并实现了一个通用的buffer管理API。这里记录对该API进行的探讨。</p>
-<h3 id=note>Note</h3>
-<p>经过代码分析，gbm实际上来源于MESA内存OpenGL实现的<code>internal/drm_interface.h</code>，也就是Mesa OpenGL实现的一个私有兼容层。</p>
-<h3 id=gbm_device>gbm_device</h3>
-<p><code>gbm_device</code>是DRM设备的抽象，管理所有的分配出来的BO（Buffer Object）。自然而然：</p>
-<ul>
-<li>一个<code>gbm_device</code>创建出来的BO的生命周期与该<code>gbm_device</code>绑定</li>
-<li><code>gbm_device</code>与特定DRI设备绑定</li>
-</ul>
-<p><code>gbm_create_device</code>负责从一个DRM设备中创建<code>gbm_device</code>：</p>
-<div class=highlight><div class=chroma>
-<table class=lntable><tr><td class=lntd>
-<pre tabindex=0 class=chroma><code><span class=lnt>1
-</span></code></pre></td>
-<td class=lntd>
-<pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=k>struct</span> <span class=n>gbm_device</span><span class=o>*</span> <span class=nf>gbm_create_device</span><span class=p>(</span><span class=kt>int</span> <span class=n>fd</span><span class=p>);</span>
-</code></pre></td></tr></table>
-</div>
-</div><p>这里的fd自然是打开<code>/dev/dri/card*</code>时的文件描述符。</p>
-<h3 id=gbm_bo>gbm_bo</h3>
-<p><code>gbm_bo_create</code>函数用于创建BO，其原型如下：</p>
-<div class=highlight><div class=chroma>
-<table class=lntable><tr><td class=lntd>
-<pre tabindex=0 class=chroma><code><span class=lnt>1
+<span></span></div></div><nav id=mobile-menu class="mobile-menu slideout-menu"><ul class=mobile-menu-list><a href=/><li class=mobile-menu-item>Home</li></a><a href=/post/><li class=mobile-menu-item>Archives</li></a><a href=/tags/><li class=mobile-menu-item>Tags</li></a><a href=/categories/><li class=mobile-menu-item>Categories</li></a></ul></nav><div class=container id=mobile-panel><header id=header class=header><div class=logo-wrapper><a href=/ class=logo>crab2313's blog</a></div><nav class=site-navbar><ul id=menu class=menu><li class=menu-item><a class=menu-item-link href=/>Home</a></li><li class=menu-item><a class=menu-item-link href=/post/>Archives</a></li><li class=menu-item><a class=menu-item-link href=/tags/>Tags</a></li><li class=menu-item><a class=menu-item-link href=/categories/>Categories</a></li></ul></nav></header><main id=main class=main><div class=content-wrapper><div id=content class=content><article class=post><header class=post-header><h1 class=post-title>DRM框架分析（三）：显存管理</h1><div class=post-meta><span class=post-time>2021-03-28</span></div></header><div class=post-toc id=post-toc><h2 class=post-toc-title>文章目录</h2><div class=post-toc-content><nav id=TableOfContents><ul><li><ul><li><a href=#gem>GEM</a><ul><li><a href=#gem与ttm之间的关系>GEM与TTM之间的关系</a></li><li><a href=#框架初始化>框架初始化</a></li><li><a href=#handle与name>handle与name</a></li><li><a href=#drm_gem_object>drm_gem_object</a></li><li><a href=#用户态映射>用户态映射</a></li></ul></li><li><a href=#dumb>DUMB</a></li><li><a href=#gbm>GBM</a><ul><li><a href=#note>Note</a></li><li><a href=#gbm_device>gbm_device</a></li><li><a href=#gbm_bo>gbm_bo</a></li></ul></li></ul></li></ul></nav></div></div><div class=post-content><h2 id=gem>GEM</h2><h3 id=gem与ttm之间的关系>GEM与TTM之间的关系</h3><p>TTM是内核最初的DRM显存管理器，其设计思想是试图为所有的显卡驱动提供一个公共的API。TTM后面被认为是失败的，其API与实现复杂不可控，没有人愿意用他。后来intel吸取教训，设计了GEM，其设计较为灵活，只提供基本的实现，部分功能需要驱动程序通过驱动自定的接口进行扩展。GEM与TTM在特性上的主要区别为GEM不支持管理独立显存，只支持UMA，而TTM两种都支持。目前的DRM驱动程序中，基本都使用GEM作为前端为用户态提供接口，而涉及到管理独立显存的时候，则借助TTM作为后端实现管理功能。</p><h3 id=框架初始化>框架初始化</h3><p>驱动程序可以自己选择是否使用GEM框架，如果选择使用，则需要在注册<code>drm_driver</code>到DRM core中时，在<code>driver_features</code>里设置DRIVER_GEM标志。在驱动加载时，DRM框架会自动初始化GEM。</p><h3 id=handle与name>handle与name</h3><p>handle是gem_object的引用，其作用域被限制在drm文件描述符内，用于用户态程序引用内核态的drm_gem_object。当drm文件描述符被关闭时，所有的handle都会被关闭。而name则是drm_gem_object的名称，为一个32-bit整数。name的作用域是全局的，因此被直接保存在drm_gem_object内。默认情况下drm_gem_object的name都为0，表示其是未命名的。用户态可以通过FLINK为drm_gem_object命名，之后系统内的其他进程可以通过对应的name对该drm_gem_object进行访问。</p><p>handle的创建是创建GEM对象的一个步骤。目前GEM对象的创建一般是通过设备相关的API进行实现的，驱动程序可以通过<code>drm_gem_handle_create</code>函数从对应drm文件中创建一个handle返回给用于态。关于handle，gem core中还提供了<code>drm_gem_handle_delete</code>和<code>drm_gem_handle_lookup</code>函数。事实上，handle的管理是通过idr实现的。</p><h3 id=drm_gem_object>drm_gem_object</h3><p>该对象是GEM内存管理的核心。GEM目前提供的功能是不完全的，部分空缺需要驱动自行填补，因此GEM框架要求驱动在<code>drm_gem_object</code>的基础上实现自己的GEM对象。这个操作实际上就是将<code>drm_gem_object</code>嵌入到驱动自己定义的<code>{driver}_gem_object</code>中。<code>drm_gem_object</code>定义在<code>include/drm/drm_gem.h</code>中，且有详细的注释，这里不再赘述，重点分析一些字段。</p><p><code>filp</code>是一个指向<code>struct file</code>的指针，要理解它的作用就必须理解真正的内存是如何分配的。前面提到了GEM只支持UMA，即显卡使用RAM做为显存，这就又涉及到了两种情况。在PC中由于IOMMU的存在，显卡并不强制要求连续的物理内存，因此GEM可以使用SHMFS做为存储后端，此时filp指针就指向对应的文件描述符。而在嵌入式应用场景下，大部分设备没有IOMMU，因此必须要求连续的物理内存，此时filp为NULL，驱动通过CMA申请到连续的物理内存用作存储后端。注意，GEM框架并不负责管理存储后端，只提供了一些基本的helper，而存储的分配与释放完全由驱动程序控制。</p><p>TODO： 研究一下SHMFS</p><p><code>vma_node</code>简单来说是保存了这个object的mmap偏移量。这里又需要提及<code>drm_gem_object</code>向用户态的映射问题。GEM目前基本上是通过两种方式实现MAP gem_object到用户态的：设备相关IOCTL和基于drm文件描述符的mmap。后者通过一个虚拟的偏移量确定mmap究竟在映射哪一个<code>drm_gem_object</code>。该机制的实现细节需要单独讨论。</p><p><code>dma_buf</code>字段是一个<code>struct dma_buf</code>类型的字段。这里又设计drm-prime框架的细节了。简单来说，通过name来实现进程间共享<code>drm_gem_object</code>存在显而易见的安全性问题，毕竟name是全局的。攻击者可以通过特定的pattern推测或者枚举<code>drm_gem_object</code>的name，达到窃取数据的目的。后续GEM集成了dma_buf，可以通过dma_buf实现共享。</p><h3 id=用户态映射>用户态映射</h3><p>用户态映射实质上就是将<code>drm_gem_object</code>描述的存储空间映射到用户态进程的虚拟地址空间，让用户态进程可以随机读写。正如前面提到的，这里只分析GEM提供的方式，即基于drm文件描述符的mmap。我们知道mmap系统调用的原型如下：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt>1
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=line><span class=cl><span class=kt>void</span> <span class=o>*</span><span class=nf>mmap</span><span class=p>(</span><span class=kt>void</span> <span class=o>*</span><span class=n>addr</span><span class=p>,</span> <span class=n>size_t</span> <span class=n>length</span><span class=p>,</span> <span class=kt>int</span> <span class=n>prot</span><span class=p>,</span> <span class=kt>int</span> <span class=n>flags</span><span class=p>,</span> <span class=kt>int</span> <span class=n>fd</span><span class=p>,</span> <span class=n>off_t</span> <span class=n>offset</span><span class=p>);</span> 
+</span></span></code></pre></td></tr></table></div></div><p>GEM框架可以为每一个<code>drm_gem_object</code>绑定一个特定虚拟offset，通过offset辨别需要映射到用户态的<code>drm_gem_object</code>。该机制需要drm文件描述符与<code>drm_gem_object</code>的共同协作，前面看到<code>drm_gem_object</code>中提供了vma_node用于保存该信息，驱动程序需要自行调用<code>drm_gem_create_mmap_offset</code>为一个<code>drm_gem_object</code>注册一个虚拟offset。虚拟offset需要通过设备相关的IOCTL传递给用户态。<code>drm_device</code>中存在vma_offset_manager用于统一管理mmap的虚拟offset，其后端基本上为drm_mm与红黑树缓存的组合。</p><h2 id=dumb>DUMB</h2><p>(TODO)</p><h2 id=gbm>GBM</h2><p>前面看到基于GEM的驱动对外是没有提供统一的内存管理接口的，至少Buffer Object创建销毁等操作是需要自行提供设备相关的即口进行实现的。用户态没有统一的接口对缓冲区进行管理，这导致某些特定用户态程序的开发的困难，如wayland compositor。MESA项目提供了libgbm，抽象并实现了一个通用的buffer管理API。这里记录对该API进行的探讨。</p><h3 id=note>Note</h3><p>经过代码分析，gbm实际上来源于MESA内存OpenGL实现的<code>internal/drm_interface.h</code>，也就是Mesa OpenGL实现的一个私有兼容层。</p><h3 id=gbm_device>gbm_device</h3><p><code>gbm_device</code>是DRM设备的抽象，管理所有的分配出来的BO（Buffer Object）。自然而然：</p><ul><li>一个<code>gbm_device</code>创建出来的BO的生命周期与该<code>gbm_device</code>绑定</li><li><code>gbm_device</code>与特定DRI设备绑定</li></ul><p><code>gbm_create_device</code>负责从一个DRM设备中创建<code>gbm_device</code>：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt>1
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=line><span class=cl><span class=k>struct</span> <span class=n>gbm_device</span><span class=o>*</span> <span class=nf>gbm_create_device</span><span class=p>(</span><span class=kt>int</span> <span class=n>fd</span><span class=p>);</span>
+</span></span></code></pre></td></tr></table></div></div><p>这里的fd自然是打开<code>/dev/dri/card*</code>时的文件描述符。</p><h3 id=gbm_bo>gbm_bo</h3><p><code>gbm_bo_create</code>函数用于创建BO，其原型如下：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt>1
 </span><span class=lnt>2
 </span><span class=lnt>3
 </span><span class=lnt>4
-</span></code></pre></td>
-<td class=lntd>
-<pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=k>struct</span> <span class=n>gbm_bo</span> <span class=o>*</span>
-<span class=nf>gbm_bo_create</span><span class=p>(</span><span class=k>struct</span> <span class=n>gbm_device</span> <span class=o>*</span><span class=n>gbm</span><span class=p>,</span>
-              <span class=kt>uint32_t</span> <span class=n>width</span><span class=p>,</span> <span class=kt>uint32_t</span> <span class=n>height</span><span class=p>,</span>
-              <span class=kt>uint32_t</span> <span class=n>format</span><span class=p>,</span> <span class=kt>uint32_t</span> <span class=n>flags</span><span class=p>);</span>
-</code></pre></td></tr></table>
-</div>
-</div><p>函数非常简单，只需要指定BO的长宽，格式以及标志（enum gbm_bo_flags）。GBM提供了一些基本的helper用于获取BO的相关属性。除此之外比较重要的操作就是将BO映射到用户态地址空间了：</p>
-<div class=highlight><div class=chroma>
-<table class=lntable><tr><td class=lntd>
-<pre tabindex=0 class=chroma><code><span class=lnt>1
-</span></code></pre></td>
-<td class=lntd>
-<pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=kt>void</span> <span class=o>*</span><span class=nf>gbm_bo_map</span> <span class=p>(</span><span class=k>struct</span> <span class=n>gbm_bo</span> <span class=o>*</span><span class=n>bo</span><span class=p>,</span> <span class=kt>uint32_t</span> <span class=n>x</span><span class=p>,</span> <span class=kt>uint32_t</span> <span class=n>y</span><span class=p>,</span> <span class=kt>uint32_t</span> <span class=n>width</span><span class=p>,</span> <span class=kt>uint32_t</span> <span class=n>height</span><span class=p>,</span> <span class=kt>uint32_t</span> <span class=n>flags</span><span class=p>,</span> <span class=kt>uint32_t</span> <span class=o>*</span><span class=n>stride</span><span class=p>,</span> <span class=kt>void</span> <span class=o>**</span><span class=n>map_data</span><span class=p>);</span>
-</code></pre></td></tr></table>
-</div>
-</div><p>可以看到该函数提供了将BO中的特定二维区域映射到功能。</p>
-</div>
-<div class=post-copyright>
-<p class=copyright-item>
-<span class=item-title>文章作者</span>
-<span class=item-content>crab2313</span>
-</p>
-<p class=copyright-item>
-<span class=item-title>上次更新</span>
-<span class=item-content>
-2021-04-01
-<a href=https://github.com/crab2313/blog-doc/commit/a6d3eef51e2c688f545970785e4ef847c424d894 title="blog: various update about drm">(a6d3eef)</a>
-</span>
-</p>
-</div>
-<footer class=post-footer>
-<div class=post-tags>
-<a href=/tags/kernel/>kernel</a>
-<a href=/tags/drm/>drm</a>
-</div>
-<nav class=post-nav>
-<a class=prev href=/post/drm-intro/>
-<i class="iconfont icon-left"></i>
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=line><span class=cl><span class=k>struct</span> <span class=n>gbm_bo</span> <span class=o>*</span>
+</span></span><span class=line><span class=cl><span class=nf>gbm_bo_create</span><span class=p>(</span><span class=k>struct</span> <span class=n>gbm_device</span> <span class=o>*</span><span class=n>gbm</span><span class=p>,</span>
+</span></span><span class=line><span class=cl>              <span class=kt>uint32_t</span> <span class=n>width</span><span class=p>,</span> <span class=kt>uint32_t</span> <span class=n>height</span><span class=p>,</span>
+</span></span><span class=line><span class=cl>              <span class=kt>uint32_t</span> <span class=n>format</span><span class=p>,</span> <span class=kt>uint32_t</span> <span class=n>flags</span><span class=p>);</span>
+</span></span></code></pre></td></tr></table></div></div><p>函数非常简单，只需要指定BO的长宽，格式以及标志（enum gbm_bo_flags）。GBM提供了一些基本的helper用于获取BO的相关属性。除此之外比较重要的操作就是将BO映射到用户态地址空间了：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt>1
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=line><span class=cl><span class=kt>void</span> <span class=o>*</span><span class=nf>gbm_bo_map</span> <span class=p>(</span><span class=k>struct</span> <span class=n>gbm_bo</span> <span class=o>*</span><span class=n>bo</span><span class=p>,</span> <span class=kt>uint32_t</span> <span class=n>x</span><span class=p>,</span> <span class=kt>uint32_t</span> <span class=n>y</span><span class=p>,</span> <span class=kt>uint32_t</span> <span class=n>width</span><span class=p>,</span> <span class=kt>uint32_t</span> <span class=n>height</span><span class=p>,</span> <span class=kt>uint32_t</span> <span class=n>flags</span><span class=p>,</span> <span class=kt>uint32_t</span> <span class=o>*</span><span class=n>stride</span><span class=p>,</span> <span class=kt>void</span> <span class=o>**</span><span class=n>map_data</span><span class=p>);</span>
+</span></span></code></pre></td></tr></table></div></div><p>可以看到该函数提供了将BO中的特定二维区域映射到功能。</p></div><div class=post-copyright><p class=copyright-item><span class=item-title>文章作者</span>
+<span class=item-content>crab2313</span></p><p class=copyright-item><span class=item-title>上次更新</span>
+<span class=item-content>2021-04-01
+<a href=https://github.com/crab2313/blog-doc/commit/a6d3eef51e2c688f545970785e4ef847c424d894 title="blog: various update about drm">(a6d3eef)</a></span></p></div><footer class=post-footer><div class=post-tags><a href=/tags/kernel/>kernel</a>
+<a href=/tags/drm/>drm</a></div><nav class=post-nav><a class=prev href=/post/drm-intro/><i class="iconfont icon-left"></i>
 <span class="prev-text nav-default">DRM框架分析（一）：简介</span>
-<span class="prev-text nav-mobile">上一篇</span>
-</a>
-<a class=next href=/post/drm-legacy-kms/>
-<span class="next-text nav-default">DRM框架分析（二）：KMS</span>
+<span class="prev-text nav-mobile">上一篇</span></a>
+<a class=next href=/post/drm-legacy-kms/><span class="next-text nav-default">DRM框架分析（二）：KMS</span>
 <span class="next-text nav-mobile">下一篇</span>
-<i class="iconfont icon-right"></i>
-</a>
-</nav>
-</footer>
-</article>
-</div>
-</div>
-</main>
-<footer id=footer class=footer>
-<div class=social-links>
-<a href=mailto:crab2313@gmail.com class="iconfont icon-email" title=email></a>
+<i class="iconfont icon-right"></i></a></nav></footer></article></div></div></main><footer id=footer class=footer><div class=social-links><a href=mailto:crab2313@gmail.com class="iconfont icon-email" title=email></a>
 <a href=https://github.com/crab2313 class="iconfont icon-github" title=github></a>
 <a href=https://gitlab.com/crab2313 class="iconfont icon-gitlab" title=gitlab></a>
 <a href=https://space.bilibili.com/1310103 class="iconfont icon-bilibili" title=bilibili></a>
-<a href=/index.xml type=application/rss+xml class="iconfont icon-rss" title=rss></a>
-</div>
-<div class=copyright>
-<span class=power-by>
-由 <a class=hexo-link href=https://gohugo.io>Hugo</a> 强力驱动
-</span>
+<a href=/index.xml type=application/rss+xml class="iconfont icon-rss" title=rss></a></div><div class=copyright><span class=power-by>由 <a class=hexo-link href=https://gohugo.io>Hugo</a> 强力驱动</span>
 <span class=division>|</span>
-<span class=theme-info>
-主题 -
-<a class=theme-link href=https://github.com/olOwOlo/hugo-theme-even>Even</a>
-</span>
-<span class=copyright-year>
-&copy;
+<span class=theme-info>主题 -
+<a class=theme-link href=https://github.com/olOwOlo/hugo-theme-even>Even</a></span>
+<span class=copyright-year>&copy;
 2017 -
-2022<span class=heart><i class="iconfont icon-heart"></i></span><span>crab2313</span>
-</span>
-</div>
-</footer>
-<div class=back-to-top id=back-to-top>
-<i class="iconfont icon-up"></i>
-</div>
-</div>
-<script src=https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin=anonymous></script>
+2022<span class=heart><i class="iconfont icon-heart"></i></span><span>crab2313</span></span></div></footer><div class=back-to-top id=back-to-top><i class="iconfont icon-up"></i></div></div><script src=https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin=anonymous></script>
 <script src=https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin=anonymous></script>
 <script src=https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin=anonymous></script>
-<script type=text/javascript src=/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js></script>
-<script type=text/javascript>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']]}}</script>
-<script async src=https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin=anonymous></script>
-</body>
-</html>
+<script type=text/javascript src=/js/main.min.64437849d125a2d603b3e71d6de5225d641a32d17168a58106e0b61852079683.js></script>
+<script type=text/javascript>window.MathJax={tex:{inlineMath:[["$","$"],["\\(","\\)"]]}}</script><script async src=https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin=anonymous></script></body></html>

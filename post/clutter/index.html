@@ -1,177 +1,19 @@
-<!doctype html><html lang=zh-cn>
-<head>
-<meta charset=utf-8>
-<meta http-equiv=x-ua-compatible content="IE=edge,chrome=1">
-<title>Clutter代码分析 - crab2313's blog</title>
-<meta name=renderer content="webkit">
-<meta name=viewport content="width=device-width,initial-scale=1,maximum-scale=1">
-<meta http-equiv=cache-control content="no-transform">
-<meta http-equiv=cache-control content="no-siteapp">
-<meta name=theme-color content="#f8f5ec">
-<meta name=msapplication-navbutton-color content="#f8f5ec">
-<meta name=apple-mobile-web-app-capable content="yes">
-<meta name=apple-mobile-web-app-status-bar-style content="#f8f5ec">
-<meta name=author content="crab2313"><meta name=description content="本文尝试分析Clutter代码实现，其目的是获取调试Mutter代码bug的能力。Clutter的基本知识可以从网络获取，后面会贴一些基础文"><meta name=keywords content="blog,kernel">
-<meta name=generator content="Hugo 0.92.0 with theme even">
-<link rel=canonical href=/post/clutter/>
-<link rel=apple-touch-icon sizes=180x180 href=/apple-touch-icon.png>
-<link rel=icon type=image/png sizes=32x32 href=/favicon-32x32.png>
-<link rel=icon type=image/png sizes=16x16 href=/favicon-16x16.png>
-<link rel=manifest href=/manifest.json>
-<link rel=mask-icon href=/safari-pinned-tab.svg color=#5bbad5>
-<link href=/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css rel=stylesheet>
-<link rel=stylesheet href=https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin=anonymous>
-<meta property="og:title" content="Clutter代码分析">
-<meta property="og:description" content="本文尝试分析Clutter代码实现，其目的是获取调试Mutter代码bug的能力。Clutter的基本知识可以从网络获取，后面会贴一些基础文">
-<meta property="og:type" content="article">
-<meta property="og:url" content="/post/clutter/"><meta property="article:section" content="post">
-<meta property="article:published_time" content="2020-10-19T00:00:00+00:00">
-<meta property="article:modified_time" content="2021-04-07T12:01:06+08:00">
-<meta itemprop=name content="Clutter代码分析">
-<meta itemprop=description content="本文尝试分析Clutter代码实现，其目的是获取调试Mutter代码bug的能力。Clutter的基本知识可以从网络获取，后面会贴一些基础文"><meta itemprop=datePublished content="2020-10-19T00:00:00+00:00">
-<meta itemprop=dateModified content="2021-04-07T12:01:06+08:00">
-<meta itemprop=wordCount content="5194">
-<meta itemprop=keywords content="gnome,clutter,mutter,"><meta name=twitter:card content="summary">
-<meta name=twitter:title content="Clutter代码分析">
-<meta name=twitter:description content="本文尝试分析Clutter代码实现，其目的是获取调试Mutter代码bug的能力。Clutter的基本知识可以从网络获取，后面会贴一些基础文"><!--[if lte IE 9]><script src=https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js></script><![endif]--><!--[if lt IE 9]><script src=https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js></script>
-<script src=https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js></script><![endif]-->
-</head>
-<body>
-<div id=mobile-navbar class=mobile-navbar>
-<div class=mobile-header-logo>
-<a href=/ class=logo>crab2313's blog</a>
-</div>
-<div class=mobile-navbar-icon>
+<!doctype html><html lang=zh-cn><head><meta charset=utf-8><meta http-equiv=x-ua-compatible content="IE=edge,chrome=1"><title>Clutter代码分析 - crab2313's blog</title><meta name=renderer content="webkit"><meta name=viewport content="width=device-width,initial-scale=1,maximum-scale=1"><meta http-equiv=cache-control content="no-transform"><meta http-equiv=cache-control content="no-siteapp"><meta name=theme-color content="#f8f5ec"><meta name=msapplication-navbutton-color content="#f8f5ec"><meta name=apple-mobile-web-app-capable content="yes"><meta name=apple-mobile-web-app-status-bar-style content="#f8f5ec"><meta name=author content="crab2313"><meta name=description content="本文尝试分析Clutter代码实现，其目的是获取调试Mutter代码bug的能力。Clutter的基本知识可以从网络获取，后面会贴一些基础文"><meta name=keywords content="blog,kernel"><meta name=generator content="Hugo 0.96.0 with theme even"><link rel=canonical href=/post/clutter/><link rel=apple-touch-icon sizes=180x180 href=/apple-touch-icon.png><link rel=icon type=image/png sizes=32x32 href=/favicon-32x32.png><link rel=icon type=image/png sizes=16x16 href=/favicon-16x16.png><link rel=manifest href=/manifest.json><link rel=mask-icon href=/safari-pinned-tab.svg color=#5bbad5><link href=/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css rel=stylesheet><link rel=stylesheet href=https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin=anonymous><meta property="og:title" content="Clutter代码分析"><meta property="og:description" content="本文尝试分析Clutter代码实现，其目的是获取调试Mutter代码bug的能力。Clutter的基本知识可以从网络获取，后面会贴一些基础文"><meta property="og:type" content="article"><meta property="og:url" content="/post/clutter/"><meta property="article:section" content="post"><meta property="article:published_time" content="2020-10-19T00:00:00+00:00"><meta property="article:modified_time" content="2021-04-07T12:01:06+08:00"><meta itemprop=name content="Clutter代码分析"><meta itemprop=description content="本文尝试分析Clutter代码实现，其目的是获取调试Mutter代码bug的能力。Clutter的基本知识可以从网络获取，后面会贴一些基础文"><meta itemprop=datePublished content="2020-10-19T00:00:00+00:00"><meta itemprop=dateModified content="2021-04-07T12:01:06+08:00"><meta itemprop=wordCount content="5194"><meta itemprop=keywords content="gnome,clutter,mutter,"><meta name=twitter:card content="summary"><meta name=twitter:title content="Clutter代码分析"><meta name=twitter:description content="本文尝试分析Clutter代码实现，其目的是获取调试Mutter代码bug的能力。Clutter的基本知识可以从网络获取，后面会贴一些基础文"><!--[if lte IE 9]><script src=https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js></script><![endif]--><!--[if lt IE 9]><script src=https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js></script>
+<script src=https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js></script><![endif]--></head><body><div id=mobile-navbar class=mobile-navbar><div class=mobile-header-logo><a href=/ class=logo>crab2313's blog</a></div><div class=mobile-navbar-icon><span></span>
 <span></span>
-<span></span>
-<span></span>
-</div>
-</div>
-<nav id=mobile-menu class="mobile-menu slideout-menu">
-<ul class=mobile-menu-list>
-<a href=/>
-<li class=mobile-menu-item>Home</li>
-</a><a href=/post/>
-<li class=mobile-menu-item>Archives</li>
-</a><a href=/tags/>
-<li class=mobile-menu-item>Tags</li>
-</a><a href=/categories/>
-<li class=mobile-menu-item>Categories</li>
-</a>
-</ul>
-</nav>
-<div class=container id=mobile-panel>
-<header id=header class=header>
-<div class=logo-wrapper>
-<a href=/ class=logo>crab2313's blog</a>
-</div>
-<nav class=site-navbar>
-<ul id=menu class=menu>
-<li class=menu-item>
-<a class=menu-item-link href=/>Home</a>
-</li><li class=menu-item>
-<a class=menu-item-link href=/post/>Archives</a>
-</li><li class=menu-item>
-<a class=menu-item-link href=/tags/>Tags</a>
-</li><li class=menu-item>
-<a class=menu-item-link href=/categories/>Categories</a>
-</li>
-</ul>
-</nav>
-</header>
-<main id=main class=main>
-<div class=content-wrapper>
-<div id=content class=content>
-<article class=post>
-<header class=post-header>
-<h1 class=post-title>Clutter代码分析</h1>
-<div class=post-meta>
-<span class=post-time> 2020-10-19 </span>
-</div>
-</header>
-<div class=post-toc id=post-toc>
-<h2 class=post-toc-title>文章目录</h2>
-<div class=post-toc-content>
-<nav id=TableOfContents>
-<ul>
-<li>
-<ul>
-<li><a href=#clutterstage>ClutterStage</a>
-<ul>
-<li><a href=#clutter_stage_paint_view>clutter_stage_paint_view</a></li>
-<li><a href=#clutter_stage_init>clutter_stage_init</a></li>
-<li><a href=#_clutter_stage_queue_actor_redraw>_clutter_stage_queue_actor_redraw</a></li>
-<li><a href=#clutter_stage_maybe_finish_queue_redraw>clutter_stage_maybe_finish_queue_redraw</a></li>
-</ul>
-</li>
-<li><a href=#clutterframeclock>ClutterFrameClock</a>
-<ul>
-<li><a href=#clutter_frame_clock_new>clutter_frame_clock_new</a></li>
-<li><a href=#clutter_frame_clock_schedule_update>clutter_frame_clock_schedule_update</a></li>
-<li><a href=#clutter_frame_clock_dispatch>clutter_frame_clock_dispatch</a></li>
-</ul>
-</li>
-<li><a href=#clutterstageview>ClutterStageView</a>
-<ul>
-<li><a href=#frame-clock回调函数>Frame Clock回调函数</a></li>
-</ul>
-</li>
-<li><a href=#clutterstageviewcogl>ClutterStageViewCogl</a>
-<ul>
-<li><a href=#clutter_stage_cogl_redraw_view_primary>clutter_stage_cogl_redraw_view_primary</a></li>
-</ul>
-</li>
-<li><a href=#clutteractor>ClutterActor</a>
-<ul>
-<li><a href=#clutter_actor_queue_redraw>clutter_actor_queue_redraw</a></li>
-<li><a href=#_clutter_actor_finish_queue_redraw>_clutter_actor_finish_queue_redraw</a></li>
-</ul>
-</li>
-</ul>
-</li>
-</ul>
-</nav>
-</div>
-</div>
-<div class=post-content>
-<p>本文尝试分析Clutter代码实现，其目的是获取调试Mutter代码bug的能力。Clutter的基本知识可以从网络获取，后面会贴一些基础文档。Clutter是mutter的基本组成部件，如果不能正确理解clutter，那么就无法理解mutter对屏幕进行的绘制。</p>
-<p>首先clutter绘制时要考虑多显示器的支持，ClutterStage是一个大的坐标系，或者说绘制区域，而我们需要一块区域来表示显示器输出的区域，这就是<code>ClutterStageView</code>。<code>ClutterActor</code>作为一个舞台上的"演员"，是一个2D的材质，被放到了<code>ClutterStage</code>所表示的3D坐标系中。其中camera位于坐标原点，且方向为(0,0,-1)，即向下看。</p>
-<p><a href=https://gitlab.gnome.org/GNOME/mutter/-/wikis/Clutter%20Rendering%20Model>参考资料 - Mutter Wiki</a></p>
-<h2 id=clutterstage>ClutterStage</h2>
-<p>从抽象的概念上看，<code>ClutterStage</code>是最高一层的可见对象，这句话是指上是说整个渲染节点是组织成树状的，而<code>ClutterStage</code>就是它的根节点。从这个意义上来说，很明显<code>ClutterStage</code>是一个特殊的<code>ClutterActor</code>，因此在<code>Clutter</code>中被实现为<code>ClutterActor</code>的一个子类。</p>
-<h3 id=clutter_stage_paint_view>clutter_stage_paint_view</h3>
-<h3 id=clutter_stage_init>clutter_stage_init</h3>
-<p><code>ClutterStage</code>并没有<code>_new</code>函数，说明<code>Mutter</code>中并不直接使用这个类，而是使用它的子类。从<code>_init</code>函数中可以看到，<code>ClutterStage</code>中保存了一个后端<code>ClutterStageWindow</code>，该对象由<code>ClutterBackend</code>创建。viewport也是从<code>ClutterStageWindow</code>中获取的，但是很明显<code>viewport</code>就是整个渲染区域（单屏幕下应该为屏幕大小）。</p>
-<h3 id=_clutter_stage_queue_actor_redraw>_clutter_stage_queue_actor_redraw</h3>
-<p>分析<code>ClutterActor</code>的redraw操作时见到了该函数，其本质就是将<code>ClutterActor</code>的更新请求排列到redraw队列上。这个redraw队列的元素如下：</p>
-<div class=highlight><div class=chroma>
-<table class=lntable><tr><td class=lntd>
-<pre tabindex=0 class=chroma><code><span class=lnt>1
+<span></span></div></div><nav id=mobile-menu class="mobile-menu slideout-menu"><ul class=mobile-menu-list><a href=/><li class=mobile-menu-item>Home</li></a><a href=/post/><li class=mobile-menu-item>Archives</li></a><a href=/tags/><li class=mobile-menu-item>Tags</li></a><a href=/categories/><li class=mobile-menu-item>Categories</li></a></ul></nav><div class=container id=mobile-panel><header id=header class=header><div class=logo-wrapper><a href=/ class=logo>crab2313's blog</a></div><nav class=site-navbar><ul id=menu class=menu><li class=menu-item><a class=menu-item-link href=/>Home</a></li><li class=menu-item><a class=menu-item-link href=/post/>Archives</a></li><li class=menu-item><a class=menu-item-link href=/tags/>Tags</a></li><li class=menu-item><a class=menu-item-link href=/categories/>Categories</a></li></ul></nav></header><main id=main class=main><div class=content-wrapper><div id=content class=content><article class=post><header class=post-header><h1 class=post-title>Clutter代码分析</h1><div class=post-meta><span class=post-time>2020-10-19</span></div></header><div class=post-toc id=post-toc><h2 class=post-toc-title>文章目录</h2><div class=post-toc-content><nav id=TableOfContents><ul><li><ul><li><a href=#clutterstage>ClutterStage</a><ul><li><a href=#clutter_stage_paint_view>clutter_stage_paint_view</a></li><li><a href=#clutter_stage_init>clutter_stage_init</a></li><li><a href=#_clutter_stage_queue_actor_redraw>_clutter_stage_queue_actor_redraw</a></li><li><a href=#clutter_stage_maybe_finish_queue_redraw>clutter_stage_maybe_finish_queue_redraw</a></li></ul></li><li><a href=#clutterframeclock>ClutterFrameClock</a><ul><li><a href=#clutter_frame_clock_new>clutter_frame_clock_new</a></li><li><a href=#clutter_frame_clock_schedule_update>clutter_frame_clock_schedule_update</a></li><li><a href=#clutter_frame_clock_dispatch>clutter_frame_clock_dispatch</a></li></ul></li><li><a href=#clutterstageview>ClutterStageView</a><ul><li><a href=#frame-clock回调函数>Frame Clock回调函数</a></li></ul></li><li><a href=#clutterstageviewcogl>ClutterStageViewCogl</a><ul><li><a href=#clutter_stage_cogl_redraw_view_primary>clutter_stage_cogl_redraw_view_primary</a></li></ul></li><li><a href=#clutteractor>ClutterActor</a><ul><li><a href=#clutter_actor_queue_redraw>clutter_actor_queue_redraw</a></li><li><a href=#_clutter_actor_finish_queue_redraw>_clutter_actor_finish_queue_redraw</a></li></ul></li></ul></li></ul></nav></div></div><div class=post-content><p>本文尝试分析Clutter代码实现，其目的是获取调试Mutter代码bug的能力。Clutter的基本知识可以从网络获取，后面会贴一些基础文档。Clutter是mutter的基本组成部件，如果不能正确理解clutter，那么就无法理解mutter对屏幕进行的绘制。</p><p>首先clutter绘制时要考虑多显示器的支持，ClutterStage是一个大的坐标系，或者说绘制区域，而我们需要一块区域来表示显示器输出的区域，这就是<code>ClutterStageView</code>。<code>ClutterActor</code>作为一个舞台上的"演员"，是一个2D的材质，被放到了<code>ClutterStage</code>所表示的3D坐标系中。其中camera位于坐标原点，且方向为(0,0,-1)，即向下看。</p><p><a href=https://gitlab.gnome.org/GNOME/mutter/-/wikis/Clutter%20Rendering%20Model>参考资料 - Mutter Wiki</a></p><h2 id=clutterstage>ClutterStage</h2><p>从抽象的概念上看，<code>ClutterStage</code>是最高一层的可见对象，这句话是指上是说整个渲染节点是组织成树状的，而<code>ClutterStage</code>就是它的根节点。从这个意义上来说，很明显<code>ClutterStage</code>是一个特殊的<code>ClutterActor</code>，因此在<code>Clutter</code>中被实现为<code>ClutterActor</code>的一个子类。</p><h3 id=clutter_stage_paint_view>clutter_stage_paint_view</h3><h3 id=clutter_stage_init>clutter_stage_init</h3><p><code>ClutterStage</code>并没有<code>_new</code>函数，说明<code>Mutter</code>中并不直接使用这个类，而是使用它的子类。从<code>_init</code>函数中可以看到，<code>ClutterStage</code>中保存了一个后端<code>ClutterStageWindow</code>，该对象由<code>ClutterBackend</code>创建。viewport也是从<code>ClutterStageWindow</code>中获取的，但是很明显<code>viewport</code>就是整个渲染区域（单屏幕下应该为屏幕大小）。</p><h3 id=_clutter_stage_queue_actor_redraw>_clutter_stage_queue_actor_redraw</h3><p>分析<code>ClutterActor</code>的redraw操作时见到了该函数，其本质就是将<code>ClutterActor</code>的更新请求排列到redraw队列上。这个redraw队列的元素如下：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt>1
 </span><span class=lnt>2
 </span><span class=lnt>3
 </span><span class=lnt>4
 </span><span class=lnt>5
 </span><span class=lnt>6
-</span></code></pre></td>
-<td class=lntd>
-<pre tabindex=0 class=chroma><code class=language-fallback data-lang=fallback>struct _ClutterStageQueueRedrawEntry
-{
-  ClutterActor *actor;
-  gboolean has_clip;
-  ClutterPaintVolume clip;
-};
-</code></pre></td></tr></table>
-</div>
-</div><p>函数所作的第一件事就是检查<code>pending_finish_queue_redraws</code>标志，如果为false，则会对当前<code>ClutterStage</code>上外挂的所有<code>ClutterStageView</code>执行schedule_update操作，然后将标志置为true。该操作的潜在逻辑就是一旦<code>pending_queue_redraws</code>队列上有元素加入，说明整个<code>ClutterStageView</code>需要更新，所以要调度起一个update操作（具体到Native后端，即一次屏幕的刷新）。这里注意如果有两个显示器，那么两个显示器的刷新是会互相干涉的，后面的VRR实现应该要改变这一行为，然显示器不受其他显示器上才显示的<code>ClutterActor</code>的影响。</p>
-<p>后面的操作则简单，首先明确一个<code>ClutterActor</code>在这个queue里只能有一个entry，该entry被保存在<code>ClutterActor</code>中。当<code>ClutterActor</code>调用该函数时，需要将entry传入，即函数的<code>entry</code>参数。如果<code>entry</code>为<code>NULL</code>，则该<code>ClutterActor</code>不在<code>redraw</code>队列中，需要重新创建<code>ClutterStageQueueRedrawEntry</code>。反之，则需要对entry进行更新。接下来的分析应该围绕这个队列<code>stage->priv->pending_queue_redraws</code>进行。</p>
-<h3 id=clutter_stage_maybe_finish_queue_redraw>clutter_stage_maybe_finish_queue_redraw</h3>
-<p>进一步搜索之后，发现<code>stage->priv->pending_queue_redraws</code>只有这个函数用到了，这个函数就是对所有<code>ClutterActor</code>进行重绘制的函数。函数开头与<code>_clutter_stage_queue_actor_redraw</code>对应，一旦发现<code>pending_finish_queue_redraws</code>为<code>FALSE</code>，说明没有<code>ClutterActor</code>需要重新绘制，则直接返回。反之，则将其置为<code>FALSE</code>，然后进行进一步的处理。</p>
-<p>函数末尾本质就是将<code>pending_queue_redraws</code>队列中的元素一个一个取下，然后依次调用<code>_clutter_actor_finish_queue_redraw</code>函数。也就是说，当<code>ClutterActor</code>需要进行更新的时候，<code>Clutter</code>并不是直接调用后端对其进行更新，而是先将该请求缓存起来，最后在<code>ClutterStageView</code>需要更新的时候一同进行更新，这样可以避免一些重复操作。可以看到，调用<code>clutter_stage_maybe_finish_queue_redraw</code>函数的直接位置就是<code>ClutterStageView</code>中<code>ClutterFrameClock</code>的<code>frame</code>回调函数。</p>
-<h2 id=clutterframeclock>ClutterFrameClock</h2>
-<p>注意这个对象是为了实现多显示器使用独立刷新率时实现的对象，本质表示一个显示器的FrameClock。<code>ClutterFrameClock</code>直接继承GObject，与其一同定义的还有一组接口：</p>
-<div class=highlight><div class=chroma>
-<table class=lntable><tr><td class=lntd>
-<pre tabindex=0 class=chroma><code><span class=lnt> 1
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-fallback data-lang=fallback><span class=line><span class=cl>struct _ClutterStageQueueRedrawEntry
+</span></span><span class=line><span class=cl>{
+</span></span><span class=line><span class=cl>  ClutterActor *actor;
+</span></span><span class=line><span class=cl>  gboolean has_clip;
+</span></span><span class=line><span class=cl>  ClutterPaintVolume clip;
+</span></span><span class=line><span class=cl>};
+</span></span></code></pre></td></tr></table></div></div><p>函数所作的第一件事就是检查<code>pending_finish_queue_redraws</code>标志，如果为false，则会对当前<code>ClutterStage</code>上外挂的所有<code>ClutterStageView</code>执行schedule_update操作，然后将标志置为true。该操作的潜在逻辑就是一旦<code>pending_queue_redraws</code>队列上有元素加入，说明整个<code>ClutterStageView</code>需要更新，所以要调度起一个update操作（具体到Native后端，即一次屏幕的刷新）。这里注意如果有两个显示器，那么两个显示器的刷新是会互相干涉的，后面的VRR实现应该要改变这一行为，然显示器不受其他显示器上才显示的<code>ClutterActor</code>的影响。</p><p>后面的操作则简单，首先明确一个<code>ClutterActor</code>在这个queue里只能有一个entry，该entry被保存在<code>ClutterActor</code>中。当<code>ClutterActor</code>调用该函数时，需要将entry传入，即函数的<code>entry</code>参数。如果<code>entry</code>为<code>NULL</code>，则该<code>ClutterActor</code>不在<code>redraw</code>队列中，需要重新创建<code>ClutterStageQueueRedrawEntry</code>。反之，则需要对entry进行更新。接下来的分析应该围绕这个队列<code>stage->priv->pending_queue_redraws</code>进行。</p><h3 id=clutter_stage_maybe_finish_queue_redraw>clutter_stage_maybe_finish_queue_redraw</h3><p>进一步搜索之后，发现<code>stage->priv->pending_queue_redraws</code>只有这个函数用到了，这个函数就是对所有<code>ClutterActor</code>进行重绘制的函数。函数开头与<code>_clutter_stage_queue_actor_redraw</code>对应，一旦发现<code>pending_finish_queue_redraws</code>为<code>FALSE</code>，说明没有<code>ClutterActor</code>需要重新绘制，则直接返回。反之，则将其置为<code>FALSE</code>，然后进行进一步的处理。</p><p>函数末尾本质就是将<code>pending_queue_redraws</code>队列中的元素一个一个取下，然后依次调用<code>_clutter_actor_finish_queue_redraw</code>函数。也就是说，当<code>ClutterActor</code>需要进行更新的时候，<code>Clutter</code>并不是直接调用后端对其进行更新，而是先将该请求缓存起来，最后在<code>ClutterStageView</code>需要更新的时候一同进行更新，这样可以避免一些重复操作。可以看到，调用<code>clutter_stage_maybe_finish_queue_redraw</code>函数的直接位置就是<code>ClutterStageView</code>中<code>ClutterFrameClock</code>的<code>frame</code>回调函数。</p><h2 id=clutterframeclock>ClutterFrameClock</h2><p>注意这个对象是为了实现多显示器使用独立刷新率时实现的对象，本质表示一个显示器的FrameClock。<code>ClutterFrameClock</code>直接继承GObject，与其一同定义的还有一组接口：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt> 1
 </span><span class=lnt> 2
 </span><span class=lnt> 3
 </span><span class=lnt> 4
@@ -181,78 +23,47 @@
 </span><span class=lnt> 8
 </span><span class=lnt> 9
 </span><span class=lnt>10
-</span></code></pre></td>
-<td class=lntd>
-<pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=k>typedef</span> <span class=k>struct</span> <span class=n>_ClutterFrameListenerIface</span>
-<span class=p>{</span>
-  <span class=kt>void</span> <span class=p>(</span><span class=o>*</span> <span class=n>before_frame</span><span class=p>)</span> <span class=p>(</span><span class=n>ClutterFrameClock</span> <span class=o>*</span><span class=n>frame_clock</span><span class=p>,</span>
-                         <span class=kt>int64_t</span>            <span class=n>frame_count</span><span class=p>,</span>
-                         <span class=n>gpointer</span>           <span class=n>user_data</span><span class=p>);</span>
-  <span class=n>ClutterFrameResult</span> <span class=p>(</span><span class=o>*</span> <span class=n>frame</span><span class=p>)</span> <span class=p>(</span><span class=n>ClutterFrameClock</span> <span class=o>*</span><span class=n>frame_clock</span><span class=p>,</span>
-                                <span class=kt>int64_t</span>            <span class=n>frame_count</span><span class=p>,</span>
-                                <span class=kt>int64_t</span>            <span class=n>time_us</span><span class=p>,</span>
-                                <span class=n>gpointer</span>           <span class=n>user_data</span><span class=p>);</span>
-<span class=p>}</span> <span class=n>ClutterFrameListenerIface</span><span class=p>;</span>
-</code></pre></td></tr></table>
-</div>
-</div><p>创建<code>ClutterFrameClock</code>时，需要传入该对象：</p>
-<div class=highlight><div class=chroma>
-<table class=lntable><tr><td class=lntd>
-<pre tabindex=0 class=chroma><code><span class=lnt>1
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=line><span class=cl><span class=k>typedef</span> <span class=k>struct</span> <span class=n>_ClutterFrameListenerIface</span>
+</span></span><span class=line><span class=cl><span class=p>{</span>
+</span></span><span class=line><span class=cl>  <span class=kt>void</span> <span class=p>(</span><span class=o>*</span> <span class=n>before_frame</span><span class=p>)</span> <span class=p>(</span><span class=n>ClutterFrameClock</span> <span class=o>*</span><span class=n>frame_clock</span><span class=p>,</span>
+</span></span><span class=line><span class=cl>                         <span class=kt>int64_t</span>            <span class=n>frame_count</span><span class=p>,</span>
+</span></span><span class=line><span class=cl>                         <span class=n>gpointer</span>           <span class=n>user_data</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>  <span class=n>ClutterFrameResult</span> <span class=p>(</span><span class=o>*</span> <span class=n>frame</span><span class=p>)</span> <span class=p>(</span><span class=n>ClutterFrameClock</span> <span class=o>*</span><span class=n>frame_clock</span><span class=p>,</span>
+</span></span><span class=line><span class=cl>                                <span class=kt>int64_t</span>            <span class=n>frame_count</span><span class=p>,</span>
+</span></span><span class=line><span class=cl>                                <span class=kt>int64_t</span>            <span class=n>time_us</span><span class=p>,</span>
+</span></span><span class=line><span class=cl>                                <span class=n>gpointer</span>           <span class=n>user_data</span><span class=p>);</span>
+</span></span><span class=line><span class=cl><span class=p>}</span> <span class=n>ClutterFrameListenerIface</span><span class=p>;</span>
+</span></span></code></pre></td></tr></table></div></div><p>创建<code>ClutterFrameClock</code>时，需要传入该对象：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt>1
 </span><span class=lnt>2
 </span><span class=lnt>3
 </span><span class=lnt>4
-</span></code></pre></td>
-<td class=lntd>
-<pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=n>CLUTTER_EXPORT</span>
-<span class=n>ClutterFrameClock</span> <span class=o>*</span> <span class=nf>clutter_frame_clock_new</span> <span class=p>(</span><span class=kt>float</span>                            <span class=n>refresh_rate</span><span class=p>,</span>
-                                             <span class=k>const</span> <span class=n>ClutterFrameListenerIface</span> <span class=o>*</span><span class=n>iface</span><span class=p>,</span>
-                                             <span class=n>gpointer</span>                         <span class=n>user_data</span><span class=p>);</span>
-</code></pre></td></tr></table>
-</div>
-</div><h3 id=clutter_frame_clock_new>clutter_frame_clock_new</h3>
-<p>该函数创建一个<code>ClutterFrameClock</code>对象。<code>ClutterFrameClock</code>的init函数非常简单，如下：</p>
-<div class=highlight><div class=chroma>
-<table class=lntable><tr><td class=lntd>
-<pre tabindex=0 class=chroma><code><span class=lnt>1
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=line><span class=cl><span class=n>CLUTTER_EXPORT</span>
+</span></span><span class=line><span class=cl><span class=n>ClutterFrameClock</span> <span class=o>*</span> <span class=nf>clutter_frame_clock_new</span> <span class=p>(</span><span class=kt>float</span>                            <span class=n>refresh_rate</span><span class=p>,</span>
+</span></span><span class=line><span class=cl>                                             <span class=k>const</span> <span class=n>ClutterFrameListenerIface</span> <span class=o>*</span><span class=n>iface</span><span class=p>,</span>
+</span></span><span class=line><span class=cl>                                             <span class=n>gpointer</span>                         <span class=n>user_data</span><span class=p>);</span>
+</span></span></code></pre></td></tr></table></div></div><h3 id=clutter_frame_clock_new>clutter_frame_clock_new</h3><p>该函数创建一个<code>ClutterFrameClock</code>对象。<code>ClutterFrameClock</code>的init函数非常简单，如下：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt>1
 </span><span class=lnt>2
 </span><span class=lnt>3
 </span><span class=lnt>4
 </span><span class=lnt>5
-</span></code></pre></td>
-<td class=lntd>
-<pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=k>static</span> <span class=kt>void</span>
-<span class=nf>clutter_frame_clock_init</span> <span class=p>(</span><span class=n>ClutterFrameClock</span> <span class=o>*</span><span class=n>frame_clock</span><span class=p>)</span>
-<span class=p>{</span>
-  <span class=n>frame_clock</span><span class=o>-&gt;</span><span class=n>state</span> <span class=o>=</span> <span class=n>CLUTTER_FRAME_CLOCK_STATE_INIT</span><span class=p>;</span>
-<span class=p>}</span>
-</code></pre></td></tr></table>
-</div>
-</div><p><code>clutter_frame_clock_new</code>函数会调用<code>g_object_new</code>创建对象，然后将参数保存在对象中，最后调用<code>init_frame_clock_source</code>进行初始化操作。事件驱动编程的核心就是事件源与对应的处理，和明显<code>ClutterFrameClock</code>可以作为一个事件源，<code>init_frame_clock_source</code>函数的核心就是创建这样一个事件源(GSource)，然后加入到当前线程的事件循环中。可以看到，这个<code>GSource</code>的<code>GSourceFuncs</code>为<code>frame_clock_source_funcs</code>：</p>
-<div class=highlight><div class=chroma>
-<table class=lntable><tr><td class=lntd>
-<pre tabindex=0 class=chroma><code><span class=lnt>1
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=line><span class=cl><span class=k>static</span> <span class=kt>void</span>
+</span></span><span class=line><span class=cl><span class=nf>clutter_frame_clock_init</span> <span class=p>(</span><span class=n>ClutterFrameClock</span> <span class=o>*</span><span class=n>frame_clock</span><span class=p>)</span>
+</span></span><span class=line><span class=cl><span class=p>{</span>
+</span></span><span class=line><span class=cl>  <span class=n>frame_clock</span><span class=o>-&gt;</span><span class=n>state</span> <span class=o>=</span> <span class=n>CLUTTER_FRAME_CLOCK_STATE_INIT</span><span class=p>;</span>
+</span></span><span class=line><span class=cl><span class=p>}</span>
+</span></span></code></pre></td></tr></table></div></div><p><code>clutter_frame_clock_new</code>函数会调用<code>g_object_new</code>创建对象，然后将参数保存在对象中，最后调用<code>init_frame_clock_source</code>进行初始化操作。事件驱动编程的核心就是事件源与对应的处理，和明显<code>ClutterFrameClock</code>可以作为一个事件源，<code>init_frame_clock_source</code>函数的核心就是创建这样一个事件源(GSource)，然后加入到当前线程的事件循环中。可以看到，这个<code>GSource</code>的<code>GSourceFuncs</code>为<code>frame_clock_source_funcs</code>：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt>1
 </span><span class=lnt>2
 </span><span class=lnt>3
 </span><span class=lnt>4
 </span><span class=lnt>5
 </span><span class=lnt>6
-</span></code></pre></td>
-<td class=lntd>
-<pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=k>static</span> <span class=n>GSourceFuncs</span> <span class=n>frame_clock_source_funcs</span> <span class=o>=</span> <span class=p>{</span>
-  <span class=nb>NULL</span><span class=p>,</span>
-  <span class=nb>NULL</span><span class=p>,</span>
-  <span class=n>frame_clock_source_dispatch</span><span class=p>,</span>
-  <span class=nb>NULL</span>
-<span class=p>};</span>
-</code></pre></td></tr></table>
-</div>
-</div><p>看到<code>prepare</code>和<code>check</code>都为NULL，这说明<code>prepare</code>和<code>check</code>都默认为NULL。事实上这个<code>GSource</code>使用<code>Ready Time</code>触发dispatch操作。dispatch函数最终会调用<code>clutter_frame_clock_dispatch</code>函数，后面进行分析。</p>
-<h3 id=clutter_frame_clock_schedule_update>clutter_frame_clock_schedule_update</h3>
-<p>该函数用于调度起一次更新操作，需要注意<code>ClutterFrameClock</code>本身是一个状态机，有如下状态：</p>
-<div class=highlight><div class=chroma>
-<table class=lntable><tr><td class=lntd>
-<pre tabindex=0 class=chroma><code><span class=lnt>1
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=line><span class=cl><span class=k>static</span> <span class=n>GSourceFuncs</span> <span class=n>frame_clock_source_funcs</span> <span class=o>=</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>  <span class=nb>NULL</span><span class=p>,</span>
+</span></span><span class=line><span class=cl>  <span class=nb>NULL</span><span class=p>,</span>
+</span></span><span class=line><span class=cl>  <span class=n>frame_clock_source_dispatch</span><span class=p>,</span>
+</span></span><span class=line><span class=cl>  <span class=nb>NULL</span>
+</span></span><span class=line><span class=cl><span class=p>};</span>
+</span></span></code></pre></td></tr></table></div></div><p>看到<code>prepare</code>和<code>check</code>都为NULL，这说明<code>prepare</code>和<code>check</code>都默认为NULL。事实上这个<code>GSource</code>使用<code>Ready Time</code>触发dispatch操作。dispatch函数最终会调用<code>clutter_frame_clock_dispatch</code>函数，后面进行分析。</p><h3 id=clutter_frame_clock_schedule_update>clutter_frame_clock_schedule_update</h3><p>该函数用于调度起一次更新操作，需要注意<code>ClutterFrameClock</code>本身是一个状态机，有如下状态：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt>1
 </span><span class=lnt>2
 </span><span class=lnt>3
 </span><span class=lnt>4
@@ -260,58 +71,35 @@
 </span><span class=lnt>6
 </span><span class=lnt>7
 </span><span class=lnt>8
-</span></code></pre></td>
-<td class=lntd>
-<pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=k>typedef</span> <span class=k>enum</span> <span class=n>_ClutterFrameClockState</span>
-<span class=p>{</span>
-  <span class=n>CLUTTER_FRAME_CLOCK_STATE_INIT</span><span class=p>,</span>
-  <span class=n>CLUTTER_FRAME_CLOCK_STATE_IDLE</span><span class=p>,</span>
-  <span class=n>CLUTTER_FRAME_CLOCK_STATE_SCHEDULED</span><span class=p>,</span>
-  <span class=n>CLUTTER_FRAME_CLOCK_STATE_DISPATCHING</span><span class=p>,</span>
-  <span class=n>CLUTTER_FRAME_CLOCK_STATE_PENDING_PRESENTED</span><span class=p>,</span>
-<span class=p>}</span> <span class=n>ClutterFrameClockState</span><span class=p>;</span>
-</code></pre></td></tr></table>
-</div>
-</div><p>在不同状态下，调用<code>clutter_frame_clock_schedule_update</code>所在成的效果是不同的。<code>ClutterFrameClock</code>刚被创建时，其状态为<code>INIT</code>，则调用该函数时如下：</p>
-<div class=highlight><div class=chroma>
-<table class=lntable><tr><td class=lntd>
-<pre tabindex=0 class=chroma><code><span class=lnt>1
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=line><span class=cl><span class=k>typedef</span> <span class=k>enum</span> <span class=n>_ClutterFrameClockState</span>
+</span></span><span class=line><span class=cl><span class=p>{</span>
+</span></span><span class=line><span class=cl>  <span class=n>CLUTTER_FRAME_CLOCK_STATE_INIT</span><span class=p>,</span>
+</span></span><span class=line><span class=cl>  <span class=n>CLUTTER_FRAME_CLOCK_STATE_IDLE</span><span class=p>,</span>
+</span></span><span class=line><span class=cl>  <span class=n>CLUTTER_FRAME_CLOCK_STATE_SCHEDULED</span><span class=p>,</span>
+</span></span><span class=line><span class=cl>  <span class=n>CLUTTER_FRAME_CLOCK_STATE_DISPATCHING</span><span class=p>,</span>
+</span></span><span class=line><span class=cl>  <span class=n>CLUTTER_FRAME_CLOCK_STATE_PENDING_PRESENTED</span><span class=p>,</span>
+</span></span><span class=line><span class=cl><span class=p>}</span> <span class=n>ClutterFrameClockState</span><span class=p>;</span>
+</span></span></code></pre></td></tr></table></div></div><p>在不同状态下，调用<code>clutter_frame_clock_schedule_update</code>所在成的效果是不同的。<code>ClutterFrameClock</code>刚被创建时，其状态为<code>INIT</code>，则调用该函数时如下：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt>1
 </span><span class=lnt>2
 </span><span class=lnt>3
 </span><span class=lnt>4
 </span><span class=lnt>5
-</span></code></pre></td>
-<td class=lntd>
-<pre tabindex=0 class=chroma><code class=language-c data-lang=c>  <span class=k>switch</span> <span class=p>(</span><span class=n>frame_clock</span><span class=o>-&gt;</span><span class=n>state</span><span class=p>)</span>
-    <span class=p>{</span>
-    <span class=k>case</span> <span class=nl>CLUTTER_FRAME_CLOCK_STATE_INIT</span><span class=p>:</span>
-      <span class=n>next_update_time_us</span> <span class=o>=</span> <span class=n>g_get_monotonic_time</span> <span class=p>();</span>
-      <span class=k>break</span><span class=p>;</span>
-</code></pre></td></tr></table>
-</div>
-</div><p>其中<code>next_update_time_us</code>为后面设置<code>GSource</code>的<code>Ready Time</code>时的事件戳，把其设置为当前时间，也就是立即进行<code>dispatch</code>操作的意思。而<code>IDLE</code>状态时，会计算该时间戳：</p>
-<div class=highlight><div class=chroma>
-<table class=lntable><tr><td class=lntd>
-<pre tabindex=0 class=chroma><code><span class=lnt>1
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=line><span class=cl>  <span class=k>switch</span> <span class=p>(</span><span class=n>frame_clock</span><span class=o>-&gt;</span><span class=n>state</span><span class=p>)</span>
+</span></span><span class=line><span class=cl>    <span class=p>{</span>
+</span></span><span class=line><span class=cl>    <span class=k>case</span> <span class=nl>CLUTTER_FRAME_CLOCK_STATE_INIT</span><span class=p>:</span>
+</span></span><span class=line><span class=cl>      <span class=n>next_update_time_us</span> <span class=o>=</span> <span class=n>g_get_monotonic_time</span> <span class=p>();</span>
+</span></span><span class=line><span class=cl>      <span class=k>break</span><span class=p>;</span>
+</span></span></code></pre></td></tr></table></div></div><p>其中<code>next_update_time_us</code>为后面设置<code>GSource</code>的<code>Ready Time</code>时的事件戳，把其设置为当前时间，也就是立即进行<code>dispatch</code>操作的意思。而<code>IDLE</code>状态时，会计算该时间戳：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt>1
 </span><span class=lnt>2
 </span><span class=lnt>3
 </span><span class=lnt>4
 </span><span class=lnt>5
-</span></code></pre></td>
-<td class=lntd>
-<pre tabindex=0 class=chroma><code class=language-c data-lang=c>    <span class=k>case</span> <span class=nl>CLUTTER_FRAME_CLOCK_STATE_IDLE</span><span class=p>:</span>
-      <span class=n>calculate_next_update_time_us</span> <span class=p>(</span><span class=n>frame_clock</span><span class=p>,</span>
-                                     <span class=o>&amp;</span><span class=n>next_update_time_us</span><span class=p>,</span>
-                                     <span class=o>&amp;</span><span class=n>frame_clock</span><span class=o>-&gt;</span><span class=n>next_presentation_time_us</span><span class=p>);</span>
-      <span class=n>frame_clock</span><span class=o>-&gt;</span><span class=n>is_next_presentation_time_valid</span> <span class=o>=</span> <span class=n>TRUE</span><span class=p>;</span>
-</code></pre></td></tr></table>
-</div>
-</div><p>计算方式比较复杂，最后进行分析。如果当前为<code>SCHEDULED</code>状态，即<code>GSource</code>已经设置好了<code>Ready Time</code>，正在等待dispatch，则直接返回。对于<code>DISPATCHING</code>和<code>PENDING_PRESENTED</code>状态，则设置<code>pending_reschedule</code>标志，然后返回。对于<code>IDLE</code>和<code>INIT</code>，计算完<code>next_update_time_us</code>后将会设置对应的<code>Ready Time</code>，然后将状态设置为<code>SCHEDULED</code>。</p>
-<h3 id=clutter_frame_clock_dispatch>clutter_frame_clock_dispatch</h3>
-<p>前面提到了这个函数是对应的<code>dispatch</code>函数。函数第一件做的事情就是清空<code>Ready Time</code>，停止<code>dispatch</code>后续的触发，然后将<code>ClutterFrameClock</code>的状态设置为<code>DISPATCHING</code>。随后函数自增记录<code>frame</code>产生个数的计数器，然后调用创建<code>ClutterFrameClock</code>时传入的<code>before_frame</code>回掉函数。接下来更新<code>ClutterFrameClock</code>中注册的<code>ClutterTimeline</code>对象，然后调用<code>frame</code>回调函数。函数末尾会根据<code>frame</code>回调函数返回的值决定<code>ClutterFrameClock</code>的状态：</p>
-<div class=highlight><div class=chroma>
-<table class=lntable><tr><td class=lntd>
-<pre tabindex=0 class=chroma><code><span class=lnt> 1
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=line><span class=cl>    <span class=k>case</span> <span class=nl>CLUTTER_FRAME_CLOCK_STATE_IDLE</span><span class=p>:</span>
+</span></span><span class=line><span class=cl>      <span class=n>calculate_next_update_time_us</span> <span class=p>(</span><span class=n>frame_clock</span><span class=p>,</span>
+</span></span><span class=line><span class=cl>                                     <span class=o>&amp;</span><span class=n>next_update_time_us</span><span class=p>,</span>
+</span></span><span class=line><span class=cl>                                     <span class=o>&amp;</span><span class=n>frame_clock</span><span class=o>-&gt;</span><span class=n>next_presentation_time_us</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>      <span class=n>frame_clock</span><span class=o>-&gt;</span><span class=n>is_next_presentation_time_valid</span> <span class=o>=</span> <span class=n>TRUE</span><span class=p>;</span>
+</span></span></code></pre></td></tr></table></div></div><p>计算方式比较复杂，最后进行分析。如果当前为<code>SCHEDULED</code>状态，即<code>GSource</code>已经设置好了<code>Ready Time</code>，正在等待dispatch，则直接返回。对于<code>DISPATCHING</code>和<code>PENDING_PRESENTED</code>状态，则设置<code>pending_reschedule</code>标志，然后返回。对于<code>IDLE</code>和<code>INIT</code>，计算完<code>next_update_time_us</code>后将会设置对应的<code>Ready Time</code>，然后将状态设置为<code>SCHEDULED</code>。</p><h3 id=clutter_frame_clock_dispatch>clutter_frame_clock_dispatch</h3><p>前面提到了这个函数是对应的<code>dispatch</code>函数。函数第一件做的事情就是清空<code>Ready Time</code>，停止<code>dispatch</code>后续的触发，然后将<code>ClutterFrameClock</code>的状态设置为<code>DISPATCHING</code>。随后函数自增记录<code>frame</code>产生个数的计数器，然后调用创建<code>ClutterFrameClock</code>时传入的<code>before_frame</code>回掉函数。接下来更新<code>ClutterFrameClock</code>中注册的<code>ClutterTimeline</code>对象，然后调用<code>frame</code>回调函数。函数末尾会根据<code>frame</code>回调函数返回的值决定<code>ClutterFrameClock</code>的状态：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt> 1
 </span><span class=lnt> 2
 </span><span class=lnt> 3
 </span><span class=lnt> 4
@@ -322,57 +110,32 @@
 </span><span class=lnt> 9
 </span><span class=lnt>10
 </span><span class=lnt>11
-</span></code></pre></td>
-<td class=lntd>
-<pre tabindex=0 class=chroma><code class=language-c data-lang=c>    <span class=k>case</span> <span class=nl>CLUTTER_FRAME_CLOCK_STATE_DISPATCHING</span><span class=p>:</span>
-      <span class=k>switch</span> <span class=p>(</span><span class=n>result</span><span class=p>)</span>
-        <span class=p>{</span>
-        <span class=k>case</span> <span class=nl>CLUTTER_FRAME_RESULT_PENDING_PRESENTED</span><span class=p>:</span>
-          <span class=n>frame_clock</span><span class=o>-&gt;</span><span class=n>state</span> <span class=o>=</span> <span class=n>CLUTTER_FRAME_CLOCK_STATE_PENDING_PRESENTED</span><span class=p>;</span>
-          <span class=k>break</span><span class=p>;</span>
-        <span class=k>case</span> <span class=nl>CLUTTER_FRAME_RESULT_IDLE</span><span class=p>:</span>
-          <span class=n>frame_clock</span><span class=o>-&gt;</span><span class=n>state</span> <span class=o>=</span> <span class=n>CLUTTER_FRAME_CLOCK_STATE_IDLE</span><span class=p>;</span>
-          <span class=n>maybe_reschedule_update</span> <span class=p>(</span><span class=n>frame_clock</span><span class=p>);</span>
-          <span class=k>break</span><span class=p>;</span>
-        <span class=p>}</span>
-</code></pre></td></tr></table>
-</div>
-</div><h2 id=clutterstageview>ClutterStageView</h2>
-<p>只有<code>Mutter</code>中的<code>Clutter</code>有该类。从<code>Mutter</code>的角度来看，<code>ClutterStageView</code>将一个<code>ClutterStage</code>的特定区域渲染到一个屏幕区域，其实质上承担的任务为多显示器的输出工作。除此之外，<code>ClutterStageView</code>还持有前后端的FrameBuffer，并且在最近的改动中管理FrameClock。</p>
-<p><code>ClutterStageView</code>是一个GObject，作为基类被具体实现的子类继承。</p>
-<h3 id=frame-clock回调函数>Frame Clock回调函数</h3>
-<p>前面提到了<code>ClutterStageView</code>内部包含了一个<code>ClutterFrameClock</code>，我们可以在该对象的创建函数中看到：</p>
-<div class=highlight><div class=chroma>
-<table class=lntable><tr><td class=lntd>
-<pre tabindex=0 class=chroma><code><span class=lnt>1
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=line><span class=cl>    <span class=k>case</span> <span class=nl>CLUTTER_FRAME_CLOCK_STATE_DISPATCHING</span><span class=p>:</span>
+</span></span><span class=line><span class=cl>      <span class=k>switch</span> <span class=p>(</span><span class=n>result</span><span class=p>)</span>
+</span></span><span class=line><span class=cl>        <span class=p>{</span>
+</span></span><span class=line><span class=cl>        <span class=k>case</span> <span class=nl>CLUTTER_FRAME_RESULT_PENDING_PRESENTED</span><span class=p>:</span>
+</span></span><span class=line><span class=cl>          <span class=n>frame_clock</span><span class=o>-&gt;</span><span class=n>state</span> <span class=o>=</span> <span class=n>CLUTTER_FRAME_CLOCK_STATE_PENDING_PRESENTED</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>          <span class=k>break</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>        <span class=k>case</span> <span class=nl>CLUTTER_FRAME_RESULT_IDLE</span><span class=p>:</span>
+</span></span><span class=line><span class=cl>          <span class=n>frame_clock</span><span class=o>-&gt;</span><span class=n>state</span> <span class=o>=</span> <span class=n>CLUTTER_FRAME_CLOCK_STATE_IDLE</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>          <span class=n>maybe_reschedule_update</span> <span class=p>(</span><span class=n>frame_clock</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>          <span class=k>break</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>        <span class=p>}</span>
+</span></span></code></pre></td></tr></table></div></div><h2 id=clutterstageview>ClutterStageView</h2><p>只有<code>Mutter</code>中的<code>Clutter</code>有该类。从<code>Mutter</code>的角度来看，<code>ClutterStageView</code>将一个<code>ClutterStage</code>的特定区域渲染到一个屏幕区域，其实质上承担的任务为多显示器的输出工作。除此之外，<code>ClutterStageView</code>还持有前后端的FrameBuffer，并且在最近的改动中管理FrameClock。</p><p><code>ClutterStageView</code>是一个GObject，作为基类被具体实现的子类继承。</p><h3 id=frame-clock回调函数>Frame Clock回调函数</h3><p>前面提到了<code>ClutterStageView</code>内部包含了一个<code>ClutterFrameClock</code>，我们可以在该对象的创建函数中看到：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt>1
 </span><span class=lnt>2
 </span><span class=lnt>3
-</span></code></pre></td>
-<td class=lntd>
-<pre tabindex=0 class=chroma><code class=language-c data-lang=c>  <span class=n>priv</span><span class=o>-&gt;</span><span class=n>frame_clock</span> <span class=o>=</span> <span class=n>clutter_frame_clock_new</span> <span class=p>(</span><span class=n>priv</span><span class=o>-&gt;</span><span class=n>refresh_rate</span><span class=p>,</span>
-                                               <span class=o>&amp;</span><span class=n>frame_clock_listener_iface</span><span class=p>,</span>
-                                               <span class=n>view</span><span class=p>);</span>
-</code></pre></td></tr></table>
-</div>
-</div><p>现在来分析其注册的两个回调函数：</p>
-<div class=highlight><div class=chroma>
-<table class=lntable><tr><td class=lntd>
-<pre tabindex=0 class=chroma><code><span class=lnt>1
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=line><span class=cl>  <span class=n>priv</span><span class=o>-&gt;</span><span class=n>frame_clock</span> <span class=o>=</span> <span class=n>clutter_frame_clock_new</span> <span class=p>(</span><span class=n>priv</span><span class=o>-&gt;</span><span class=n>refresh_rate</span><span class=p>,</span>
+</span></span><span class=line><span class=cl>                                               <span class=o>&amp;</span><span class=n>frame_clock_listener_iface</span><span class=p>,</span>
+</span></span><span class=line><span class=cl>                                               <span class=n>view</span><span class=p>);</span>
+</span></span></code></pre></td></tr></table></div></div><p>现在来分析其注册的两个回调函数：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt>1
 </span><span class=lnt>2
 </span><span class=lnt>3
 </span><span class=lnt>4
-</span></code></pre></td>
-<td class=lntd>
-<pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=k>static</span> <span class=k>const</span> <span class=n>ClutterFrameListenerIface</span> <span class=n>frame_clock_listener_iface</span> <span class=o>=</span> <span class=p>{</span>
-  <span class=p>.</span><span class=n>before_frame</span> <span class=o>=</span> <span class=n>handle_frame_clock_before_frame</span><span class=p>,</span>
-  <span class=p>.</span><span class=n>frame</span> <span class=o>=</span> <span class=n>handle_frame_clock_frame</span><span class=p>,</span>
-<span class=p>};</span>
-</code></pre></td></tr></table>
-</div>
-</div><p>其中<code>before_frame</code>函数做的事情比较单一，就是处理当前<code>ClutterStageView</code>等待处理的事件：</p>
-<div class=highlight><div class=chroma>
-<table class=lntable><tr><td class=lntd>
-<pre tabindex=0 class=chroma><code><span class=lnt> 1
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=line><span class=cl><span class=k>static</span> <span class=k>const</span> <span class=n>ClutterFrameListenerIface</span> <span class=n>frame_clock_listener_iface</span> <span class=o>=</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>  <span class=p>.</span><span class=n>before_frame</span> <span class=o>=</span> <span class=n>handle_frame_clock_before_frame</span><span class=p>,</span>
+</span></span><span class=line><span class=cl>  <span class=p>.</span><span class=n>frame</span> <span class=o>=</span> <span class=n>handle_frame_clock_frame</span><span class=p>,</span>
+</span></span><span class=line><span class=cl><span class=p>};</span>
+</span></span></code></pre></td></tr></table></div></div><p>其中<code>before_frame</code>函数做的事情比较单一，就是处理当前<code>ClutterStageView</code>等待处理的事件：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt> 1
 </span><span class=lnt> 2
 </span><span class=lnt> 3
 </span><span class=lnt> 4
@@ -383,28 +146,18 @@
 </span><span class=lnt> 9
 </span><span class=lnt>10
 </span><span class=lnt>11
-</span></code></pre></td>
-<td class=lntd>
-<pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=k>static</span> <span class=kt>void</span>
-<span class=nf>handle_frame_clock_before_frame</span> <span class=p>(</span><span class=n>ClutterFrameClock</span> <span class=o>*</span><span class=n>frame_clock</span><span class=p>,</span>
-                                 <span class=kt>int64_t</span>            <span class=n>frame_count</span><span class=p>,</span>
-                                 <span class=n>gpointer</span>           <span class=n>user_data</span><span class=p>)</span>
-<span class=p>{</span>
-  <span class=n>ClutterStageView</span> <span class=o>*</span><span class=n>view</span> <span class=o>=</span> <span class=n>user_data</span><span class=p>;</span>
-  <span class=n>ClutterStageViewPrivate</span> <span class=o>*</span><span class=n>priv</span> <span class=o>=</span>
-    <span class=n>clutter_stage_view_get_instance_private</span> <span class=p>(</span><span class=n>view</span><span class=p>);</span>
-
-  <span class=n>_clutter_stage_process_queued_events</span> <span class=p>(</span><span class=n>priv</span><span class=o>-&gt;</span><span class=n>stage</span><span class=p>);</span>
-<span class=p>}</span>
-</code></pre></td></tr></table>
-</div>
-</div><p>然后<code>frame</code>回调函数的处理就相当复杂了，毕竟是整个Mutter渲染的核心驱动，涉及了大量的Clutter实现细节。</p>
-<p>TODO</p>
-<h2 id=clutterstageviewcogl>ClutterStageViewCogl</h2>
-<p>这里只关注<code>redraw_view</code>回调函数。可以看到<code>ClutterStageViewCogl</code>是实现了<code>ClutterStageWindow</code>接口，且前面发现在<code>ClutterStageView</code>的<code>frame</code>回调函数中调用了<code>_clutter_stage_window_redraw_view</code>函数，这里就来分析这个函数。<code>ClutterStageViewCogl</code>实现的接口如下：</p>
-<div class=highlight><div class=chroma>
-<table class=lntable><tr><td class=lntd>
-<pre tabindex=0 class=chroma><code><span class=lnt> 1
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=line><span class=cl><span class=k>static</span> <span class=kt>void</span>
+</span></span><span class=line><span class=cl><span class=nf>handle_frame_clock_before_frame</span> <span class=p>(</span><span class=n>ClutterFrameClock</span> <span class=o>*</span><span class=n>frame_clock</span><span class=p>,</span>
+</span></span><span class=line><span class=cl>                                 <span class=kt>int64_t</span>            <span class=n>frame_count</span><span class=p>,</span>
+</span></span><span class=line><span class=cl>                                 <span class=n>gpointer</span>           <span class=n>user_data</span><span class=p>)</span>
+</span></span><span class=line><span class=cl><span class=p>{</span>
+</span></span><span class=line><span class=cl>  <span class=n>ClutterStageView</span> <span class=o>*</span><span class=n>view</span> <span class=o>=</span> <span class=n>user_data</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>  <span class=n>ClutterStageViewPrivate</span> <span class=o>*</span><span class=n>priv</span> <span class=o>=</span>
+</span></span><span class=line><span class=cl>    <span class=n>clutter_stage_view_get_instance_private</span> <span class=p>(</span><span class=n>view</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>  <span class=n>_clutter_stage_process_queued_events</span> <span class=p>(</span><span class=n>priv</span><span class=o>-&gt;</span><span class=n>stage</span><span class=p>);</span>
+</span></span><span class=line><span class=cl><span class=p>}</span>
+</span></span></code></pre></td></tr></table></div></div><p>然后<code>frame</code>回调函数的处理就相当复杂了，毕竟是整个Mutter渲染的核心驱动，涉及了大量的Clutter实现细节。</p><p>TODO</p><h2 id=clutterstageviewcogl>ClutterStageViewCogl</h2><p>这里只关注<code>redraw_view</code>回调函数。可以看到<code>ClutterStageViewCogl</code>是实现了<code>ClutterStageWindow</code>接口，且前面发现在<code>ClutterStageView</code>的<code>frame</code>回调函数中调用了<code>_clutter_stage_window_redraw_view</code>函数，这里就来分析这个函数。<code>ClutterStageViewCogl</code>实现的接口如下：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt> 1
 </span><span class=lnt> 2
 </span><span class=lnt> 3
 </span><span class=lnt> 4
@@ -416,26 +169,19 @@
 </span><span class=lnt>10
 </span><span class=lnt>11
 </span><span class=lnt>12
-</span></code></pre></td>
-<td class=lntd>
-<pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=k>static</span> <span class=kt>void</span>
-<span class=nf>clutter_stage_window_iface_init</span> <span class=p>(</span><span class=n>ClutterStageWindowInterface</span> <span class=o>*</span><span class=n>iface</span><span class=p>)</span>
-<span class=p>{</span>
-  <span class=n>iface</span><span class=o>-&gt;</span><span class=n>realize</span> <span class=o>=</span> <span class=n>clutter_stage_cogl_realize</span><span class=p>;</span>
-  <span class=n>iface</span><span class=o>-&gt;</span><span class=n>unrealize</span> <span class=o>=</span> <span class=n>clutter_stage_cogl_unrealize</span><span class=p>;</span>
-  <span class=n>iface</span><span class=o>-&gt;</span><span class=n>get_wrapper</span> <span class=o>=</span> <span class=n>clutter_stage_cogl_get_wrapper</span><span class=p>;</span>
-  <span class=n>iface</span><span class=o>-&gt;</span><span class=n>resize</span> <span class=o>=</span> <span class=n>clutter_stage_cogl_resize</span><span class=p>;</span>
-  <span class=n>iface</span><span class=o>-&gt;</span><span class=n>show</span> <span class=o>=</span> <span class=n>clutter_stage_cogl_show</span><span class=p>;</span>
-  <span class=n>iface</span><span class=o>-&gt;</span><span class=n>hide</span> <span class=o>=</span> <span class=n>clutter_stage_cogl_hide</span><span class=p>;</span>
-  <span class=n>iface</span><span class=o>-&gt;</span><span class=n>get_frame_counter</span> <span class=o>=</span> <span class=n>clutter_stage_cogl_get_frame_counter</span><span class=p>;</span>
-  <span class=n>iface</span><span class=o>-&gt;</span><span class=n>redraw_view</span> <span class=o>=</span> <span class=n>clutter_stage_cogl_redraw_view</span><span class=p>;</span>
-<span class=p>}</span>
-</code></pre></td></tr></table>
-</div>
-</div><p><code>clutter_stage_cogl_redraw_view</code>进行了scanout操作：</p>
-<div class=highlight><div class=chroma>
-<table class=lntable><tr><td class=lntd>
-<pre tabindex=0 class=chroma><code><span class=lnt> 1
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=line><span class=cl><span class=k>static</span> <span class=kt>void</span>
+</span></span><span class=line><span class=cl><span class=nf>clutter_stage_window_iface_init</span> <span class=p>(</span><span class=n>ClutterStageWindowInterface</span> <span class=o>*</span><span class=n>iface</span><span class=p>)</span>
+</span></span><span class=line><span class=cl><span class=p>{</span>
+</span></span><span class=line><span class=cl>  <span class=n>iface</span><span class=o>-&gt;</span><span class=n>realize</span> <span class=o>=</span> <span class=n>clutter_stage_cogl_realize</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>  <span class=n>iface</span><span class=o>-&gt;</span><span class=n>unrealize</span> <span class=o>=</span> <span class=n>clutter_stage_cogl_unrealize</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>  <span class=n>iface</span><span class=o>-&gt;</span><span class=n>get_wrapper</span> <span class=o>=</span> <span class=n>clutter_stage_cogl_get_wrapper</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>  <span class=n>iface</span><span class=o>-&gt;</span><span class=n>resize</span> <span class=o>=</span> <span class=n>clutter_stage_cogl_resize</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>  <span class=n>iface</span><span class=o>-&gt;</span><span class=n>show</span> <span class=o>=</span> <span class=n>clutter_stage_cogl_show</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>  <span class=n>iface</span><span class=o>-&gt;</span><span class=n>hide</span> <span class=o>=</span> <span class=n>clutter_stage_cogl_hide</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>  <span class=n>iface</span><span class=o>-&gt;</span><span class=n>get_frame_counter</span> <span class=o>=</span> <span class=n>clutter_stage_cogl_get_frame_counter</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>  <span class=n>iface</span><span class=o>-&gt;</span><span class=n>redraw_view</span> <span class=o>=</span> <span class=n>clutter_stage_cogl_redraw_view</span><span class=p>;</span>
+</span></span><span class=line><span class=cl><span class=p>}</span>
+</span></span></code></pre></td></tr></table></div></div><p><code>clutter_stage_cogl_redraw_view</code>进行了scanout操作：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt> 1
 </span><span class=lnt> 2
 </span><span class=lnt> 3
 </span><span class=lnt> 4
@@ -445,145 +191,58 @@
 </span><span class=lnt> 8
 </span><span class=lnt> 9
 </span><span class=lnt>10
-</span></code></pre></td>
-<td class=lntd>
-<pre tabindex=0 class=chroma><code class=language-c data-lang=c>  <span class=n>scanout</span> <span class=o>=</span> <span class=n>clutter_stage_view_take_scanout</span><span class=p>(</span><span class=n>view</span><span class=p>);</span>
-  <span class=k>if</span> <span class=p>(</span><span class=n>scanout</span><span class=p>)</span>
-  <span class=p>{</span>
-    <span class=n>g_autoptr</span><span class=p>(</span><span class=n>GError</span><span class=p>)</span> <span class=n>error</span> <span class=o>=</span> <span class=nb>NULL</span><span class=p>;</span>
-
-    <span class=k>if</span> <span class=p>(</span><span class=n>clutter_stage_cogl_scanout_view</span><span class=p>(</span><span class=n>stage_cogl</span><span class=p>,</span> <span class=n>view</span><span class=p>,</span> <span class=n>scanout</span><span class=p>,</span> <span class=o>&amp;</span><span class=n>error</span><span class=p>))</span>
-      <span class=k>return</span><span class=p>;</span>
-
-    <span class=n>g_warning</span><span class=p>(</span><span class=s>&#34;Failed to scan out client buffer: %s&#34;</span><span class=p>,</span> <span class=n>error</span><span class=o>-&gt;</span><span class=n>message</span><span class=p>);</span>
-  <span class=p>}</span>
-</code></pre></td></tr></table>
-</div>
-</div><p>该操作直接调用<code>cogl_onscreen_direct_scanout</code>，进而调用原先在Native后端从winsys注册的<code>onscreen_direct_scanout</code>函数指针~~，进而调用Native后端的相关代码，进行pageflip~~。这里是<code>direct_scanout</code>，目测是unredirection模式，即直接将一个buffer的内容scanout到显示器上。之后，调用<code>clutter_stage_cogl_redraw_view_primary</code>函数。</p>
-<h3 id=clutter_stage_cogl_redraw_view_primary>clutter_stage_cogl_redraw_view_primary</h3>
-<p>该函数应该就是主要的redraw函数。负责重新绘制整个显示器的framebuffer。函数传入的参数为<code>ClutterStageCogl</code>和<code>ClutterStageView</code>，也就是所有与更新相关的信息都记录在了<code>ClutterStageView</code>中。函数首先获取framebuffer信息：</p>
-<div class=highlight><div class=chroma>
-<table class=lntable><tr><td class=lntd>
-<pre tabindex=0 class=chroma><code><span class=lnt>1
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=line><span class=cl>  <span class=n>scanout</span> <span class=o>=</span> <span class=n>clutter_stage_view_take_scanout</span><span class=p>(</span><span class=n>view</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>  <span class=k>if</span> <span class=p>(</span><span class=n>scanout</span><span class=p>)</span>
+</span></span><span class=line><span class=cl>  <span class=p>{</span>
+</span></span><span class=line><span class=cl>    <span class=n>g_autoptr</span><span class=p>(</span><span class=n>GError</span><span class=p>)</span> <span class=n>error</span> <span class=o>=</span> <span class=nb>NULL</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>    <span class=k>if</span> <span class=p>(</span><span class=n>clutter_stage_cogl_scanout_view</span><span class=p>(</span><span class=n>stage_cogl</span><span class=p>,</span> <span class=n>view</span><span class=p>,</span> <span class=n>scanout</span><span class=p>,</span> <span class=o>&amp;</span><span class=n>error</span><span class=p>))</span>
+</span></span><span class=line><span class=cl>      <span class=k>return</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>    <span class=n>g_warning</span><span class=p>(</span><span class=s>&#34;Failed to scan out client buffer: %s&#34;</span><span class=p>,</span> <span class=n>error</span><span class=o>-&gt;</span><span class=n>message</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>  <span class=p>}</span>
+</span></span></code></pre></td></tr></table></div></div><p>该操作直接调用<code>cogl_onscreen_direct_scanout</code>，进而调用原先在Native后端从winsys注册的<code>onscreen_direct_scanout</code>函数指针~~，进而调用Native后端的相关代码，进行pageflip~~。这里是<code>direct_scanout</code>，目测是unredirection模式，即直接将一个buffer的内容scanout到显示器上。之后，调用<code>clutter_stage_cogl_redraw_view_primary</code>函数。</p><h3 id=clutter_stage_cogl_redraw_view_primary>clutter_stage_cogl_redraw_view_primary</h3><p>该函数应该就是主要的redraw函数。负责重新绘制整个显示器的framebuffer。函数传入的参数为<code>ClutterStageCogl</code>和<code>ClutterStageView</code>，也就是所有与更新相关的信息都记录在了<code>ClutterStageView</code>中。函数首先获取framebuffer信息：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt>1
 </span><span class=lnt>2
 </span><span class=lnt>3
 </span><span class=lnt>4
-</span></code></pre></td>
-<td class=lntd>
-<pre tabindex=0 class=chroma><code class=language-c data-lang=c>  <span class=n>clutter_stage_view_get_layout</span> <span class=p>(</span><span class=n>view</span><span class=p>,</span> <span class=o>&amp;</span><span class=n>view_rect</span><span class=p>);</span>
-  <span class=n>fb_scale</span> <span class=o>=</span> <span class=n>clutter_stage_view_get_scale</span> <span class=p>(</span><span class=n>view</span><span class=p>);</span>
-  <span class=n>fb_width</span> <span class=o>=</span> <span class=n>cogl_framebuffer_get_width</span> <span class=p>(</span><span class=n>fb</span><span class=p>);</span>
-  <span class=n>fb_height</span> <span class=o>=</span> <span class=n>cogl_framebuffer_get_height</span> <span class=p>(</span><span class=n>fb</span><span class=p>);</span>
-</code></pre></td></tr></table>
-</div>
-</div><p><code>ClutterStageView</code>中保存了一个<code>redraw_clip</code>：</p>
-<div class=highlight><div class=chroma>
-<table class=lntable><tr><td class=lntd>
-<pre tabindex=0 class=chroma><code><span class=lnt>1
-</span></code></pre></td>
-<td class=lntd>
-<pre tabindex=0 class=chroma><code class=language-c data-lang=c>  <span class=n>redraw_clip</span> <span class=o>=</span> <span class=n>clutter_stage_view_take_redraw_clip</span> <span class=p>(</span><span class=n>view</span><span class=p>);</span>
-</code></pre></td></tr></table>
-</div>
-</div><p>如果redraw_clip为空，则会进行full_redraw也就是全屏重新绘制。</p>
-<h2 id=clutteractor>ClutterActor</h2>
-<h3 id=clutter_actor_queue_redraw>clutter_actor_queue_redraw</h3>
-<p>分析这个函数的目的是想搞明白一个<code>ClutterActor</code>是如何绘制到屏幕上的。从函数名称看该函数将对应的<code>ClutterActor</code>排到redraw队列，等待下一次绘制。这里就需要搞明白：</p>
-<ul>
-<li>这个绘制队列究竟是什么</li>
-<li>什么时候进行绘制</li>
-<li>绘制的原理是什么样子的</li>
-</ul>
-<p>函数本质直接调用<code>_clutter_actor_queue_redraw_full</code>，且提供的<code>ClutterPaintVolume</code>和<code>ClutterEffect</code>都是<code>NULL</code>。我们知道每一个<code>ClutterActor</code>都是有parent的，最顶层的parrent就是<code>ClutterStage</code>，函数获取到<code>ClutterStage</code>之后，调用了<code>_clutter_stage_queue_actor_redraw</code>：</p>
-<div class=highlight><div class=chroma>
-<table class=lntable><tr><td class=lntd>
-<pre tabindex=0 class=chroma><code><span class=lnt>1
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=line><span class=cl>  <span class=n>clutter_stage_view_get_layout</span> <span class=p>(</span><span class=n>view</span><span class=p>,</span> <span class=o>&amp;</span><span class=n>view_rect</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>  <span class=n>fb_scale</span> <span class=o>=</span> <span class=n>clutter_stage_view_get_scale</span> <span class=p>(</span><span class=n>view</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>  <span class=n>fb_width</span> <span class=o>=</span> <span class=n>cogl_framebuffer_get_width</span> <span class=p>(</span><span class=n>fb</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>  <span class=n>fb_height</span> <span class=o>=</span> <span class=n>cogl_framebuffer_get_height</span> <span class=p>(</span><span class=n>fb</span><span class=p>);</span>
+</span></span></code></pre></td></tr></table></div></div><p><code>ClutterStageView</code>中保存了一个<code>redraw_clip</code>：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt>1
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=line><span class=cl>  <span class=n>redraw_clip</span> <span class=o>=</span> <span class=n>clutter_stage_view_take_redraw_clip</span> <span class=p>(</span><span class=n>view</span><span class=p>);</span>
+</span></span></code></pre></td></tr></table></div></div><p>如果redraw_clip为空，则会进行full_redraw也就是全屏重新绘制。</p><h2 id=clutteractor>ClutterActor</h2><h3 id=clutter_actor_queue_redraw>clutter_actor_queue_redraw</h3><p>分析这个函数的目的是想搞明白一个<code>ClutterActor</code>是如何绘制到屏幕上的。从函数名称看该函数将对应的<code>ClutterActor</code>排到redraw队列，等待下一次绘制。这里就需要搞明白：</p><ul><li>这个绘制队列究竟是什么</li><li>什么时候进行绘制</li><li>绘制的原理是什么样子的</li></ul><p>函数本质直接调用<code>_clutter_actor_queue_redraw_full</code>，且提供的<code>ClutterPaintVolume</code>和<code>ClutterEffect</code>都是<code>NULL</code>。我们知道每一个<code>ClutterActor</code>都是有parent的，最顶层的parrent就是<code>ClutterStage</code>，函数获取到<code>ClutterStage</code>之后，调用了<code>_clutter_stage_queue_actor_redraw</code>：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt>1
 </span><span class=lnt>2
 </span><span class=lnt>3
 </span><span class=lnt>4
 </span><span class=lnt>5
-</span></code></pre></td>
-<td class=lntd>
-<pre tabindex=0 class=chroma><code class=language-c data-lang=c>  <span class=n>self</span><span class=o>-&gt;</span><span class=n>priv</span><span class=o>-&gt;</span><span class=n>queue_redraw_entry</span> <span class=o>=</span>
-    <span class=n>_clutter_stage_queue_actor_redraw</span> <span class=p>(</span><span class=n>CLUTTER_STAGE</span> <span class=p>(</span><span class=n>stage</span><span class=p>),</span>
-                                       <span class=n>priv</span><span class=o>-&gt;</span><span class=n>queue_redraw_entry</span><span class=p>,</span>
-                                       <span class=n>self</span><span class=p>,</span>
-                                       <span class=n>volume</span><span class=p>);</span>
-</code></pre></td></tr></table>
-</div>
-</div><p>而该函数的操作可以在<code>ClutterStage</code>的分析中看到。由于前面看到<code>CluterEffect</code>为<code>NULL</code>，则函数直接将自己的<code>is_dirty</code>属性设置为<code>TRUE</code>。至此，函数结束，可以看到函数最大的工作还是委托给了<code>ClutterStage</code>进行。</p>
-<h3 id=_clutter_actor_finish_queue_redraw>_clutter_actor_finish_queue_redraw</h3>
-<p>从<code>ClutterStage</code>的分析中可以看到，该函数与<code>clutter_actor_queue_redraw</code>不同，是直接进行<code>ClutterActor</code>重绘制的函数。函数首先清空<code>priv->queue_redraw_entry</code>，毕竟函数被调用时，<code>pending_queue_redraws</code>队列正在进行清空操作。</p>
-</div>
-<div class=post-copyright>
-<p class=copyright-item>
-<span class=item-title>文章作者</span>
-<span class=item-content>crab2313</span>
-</p>
-<p class=copyright-item>
-<span class=item-title>上次更新</span>
-<span class=item-content>
-2021-04-07
-<a href=https://github.com/crab2313/blog-doc/commit/773f6f35bed59b7f7ff7669329bd2218afacc323 title="blog: clutter blog post">(773f6f3)</a>
-</span>
-</p>
-</div>
-<footer class=post-footer>
-<div class=post-tags>
-<a href=/tags/gnome/>gnome</a>
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=line><span class=cl>  <span class=n>self</span><span class=o>-&gt;</span><span class=n>priv</span><span class=o>-&gt;</span><span class=n>queue_redraw_entry</span> <span class=o>=</span>
+</span></span><span class=line><span class=cl>    <span class=n>_clutter_stage_queue_actor_redraw</span> <span class=p>(</span><span class=n>CLUTTER_STAGE</span> <span class=p>(</span><span class=n>stage</span><span class=p>),</span>
+</span></span><span class=line><span class=cl>                                       <span class=n>priv</span><span class=o>-&gt;</span><span class=n>queue_redraw_entry</span><span class=p>,</span>
+</span></span><span class=line><span class=cl>                                       <span class=n>self</span><span class=p>,</span>
+</span></span><span class=line><span class=cl>                                       <span class=n>volume</span><span class=p>);</span>
+</span></span></code></pre></td></tr></table></div></div><p>而该函数的操作可以在<code>ClutterStage</code>的分析中看到。由于前面看到<code>CluterEffect</code>为<code>NULL</code>，则函数直接将自己的<code>is_dirty</code>属性设置为<code>TRUE</code>。至此，函数结束，可以看到函数最大的工作还是委托给了<code>ClutterStage</code>进行。</p><h3 id=_clutter_actor_finish_queue_redraw>_clutter_actor_finish_queue_redraw</h3><p>从<code>ClutterStage</code>的分析中可以看到，该函数与<code>clutter_actor_queue_redraw</code>不同，是直接进行<code>ClutterActor</code>重绘制的函数。函数首先清空<code>priv->queue_redraw_entry</code>，毕竟函数被调用时，<code>pending_queue_redraws</code>队列正在进行清空操作。</p></div><div class=post-copyright><p class=copyright-item><span class=item-title>文章作者</span>
+<span class=item-content>crab2313</span></p><p class=copyright-item><span class=item-title>上次更新</span>
+<span class=item-content>2021-04-07
+<a href=https://github.com/crab2313/blog-doc/commit/773f6f35bed59b7f7ff7669329bd2218afacc323 title="blog: clutter blog post">(773f6f3)</a></span></p></div><footer class=post-footer><div class=post-tags><a href=/tags/gnome/>gnome</a>
 <a href=/tags/clutter/>clutter</a>
-<a href=/tags/mutter/>mutter</a>
-</div>
-<nav class=post-nav>
-<a class=prev href=/post/multicast/>
-<i class="iconfont icon-left"></i>
+<a href=/tags/mutter/>mutter</a></div><nav class=post-nav><a class=prev href=/post/multicast/><i class="iconfont icon-left"></i>
 <span class="prev-text nav-default">Linux内核组播包接收流程分析</span>
-<span class="prev-text nav-mobile">上一篇</span>
-</a>
-<a class=next href=/post/mutter-a-kms/>
-<span class="next-text nav-default">Mutter实现分析：Atomic Modesetting</span>
+<span class="prev-text nav-mobile">上一篇</span></a>
+<a class=next href=/post/mutter-a-kms/><span class="next-text nav-default">Mutter实现分析：Atomic Modesetting</span>
 <span class="next-text nav-mobile">下一篇</span>
-<i class="iconfont icon-right"></i>
-</a>
-</nav>
-</footer>
-</article>
-</div>
-</div>
-</main>
-<footer id=footer class=footer>
-<div class=social-links>
-<a href=mailto:crab2313@gmail.com class="iconfont icon-email" title=email></a>
+<i class="iconfont icon-right"></i></a></nav></footer></article></div></div></main><footer id=footer class=footer><div class=social-links><a href=mailto:crab2313@gmail.com class="iconfont icon-email" title=email></a>
 <a href=https://github.com/crab2313 class="iconfont icon-github" title=github></a>
 <a href=https://gitlab.com/crab2313 class="iconfont icon-gitlab" title=gitlab></a>
 <a href=https://space.bilibili.com/1310103 class="iconfont icon-bilibili" title=bilibili></a>
-<a href=/index.xml type=application/rss+xml class="iconfont icon-rss" title=rss></a>
-</div>
-<div class=copyright>
-<span class=power-by>
-由 <a class=hexo-link href=https://gohugo.io>Hugo</a> 强力驱动
-</span>
+<a href=/index.xml type=application/rss+xml class="iconfont icon-rss" title=rss></a></div><div class=copyright><span class=power-by>由 <a class=hexo-link href=https://gohugo.io>Hugo</a> 强力驱动</span>
 <span class=division>|</span>
-<span class=theme-info>
-主题 -
-<a class=theme-link href=https://github.com/olOwOlo/hugo-theme-even>Even</a>
-</span>
-<span class=copyright-year>
-&copy;
+<span class=theme-info>主题 -
+<a class=theme-link href=https://github.com/olOwOlo/hugo-theme-even>Even</a></span>
+<span class=copyright-year>&copy;
 2017 -
-2022<span class=heart><i class="iconfont icon-heart"></i></span><span>crab2313</span>
-</span>
-</div>
-</footer>
-<div class=back-to-top id=back-to-top>
-<i class="iconfont icon-up"></i>
-</div>
-</div>
-<script src=https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin=anonymous></script>
+2022<span class=heart><i class="iconfont icon-heart"></i></span><span>crab2313</span></span></div></footer><div class=back-to-top id=back-to-top><i class="iconfont icon-up"></i></div></div><script src=https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin=anonymous></script>
 <script src=https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin=anonymous></script>
 <script src=https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin=anonymous></script>
-<script type=text/javascript src=/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js></script>
-<script type=text/javascript>window.MathJax={tex:{inlineMath:[['$','$'],['\\(','\\)']]}}</script>
-<script async src=https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin=anonymous></script>
-</body>
-</html>
+<script type=text/javascript src=/js/main.min.64437849d125a2d603b3e71d6de5225d641a32d17168a58106e0b61852079683.js></script>
+<script type=text/javascript>window.MathJax={tex:{inlineMath:[["$","$"],["\\(","\\)"]]}}</script><script async src=https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin=anonymous></script></body></html>
