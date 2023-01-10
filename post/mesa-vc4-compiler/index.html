@@ -1,7 +1,7 @@
-<!doctype html><html lang=zh-cn><head><meta charset=utf-8><meta http-equiv=x-ua-compatible content="IE=edge,chrome=1"><title>MESA源码分析：VC4驱动 - 编译器实现 - crab2313's blog</title><meta name=renderer content="webkit"><meta name=viewport content="width=device-width,initial-scale=1,maximum-scale=1"><meta http-equiv=cache-control content="no-transform"><meta http-equiv=cache-control content="no-siteapp"><meta name=theme-color content="#f8f5ec"><meta name=msapplication-navbutton-color content="#f8f5ec"><meta name=apple-mobile-web-app-capable content="yes"><meta name=apple-mobile-web-app-status-bar-style content="#f8f5ec"><meta name=author content="crab2313"><meta name=description content="这里先笼统的概括一下编译器部分的工作原理，细节后面再探讨。整个vc4的编译器后端一共进行了两次转换，多级优化，并实现了shader cache"><meta name=keywords content="blog,kernel"><meta name=generator content="Hugo 0.109.0 with theme even"><link rel=canonical href=/post/mesa-vc4-compiler/><link rel=apple-touch-icon sizes=180x180 href=/apple-touch-icon.png><link rel=icon type=image/png sizes=32x32 href=/favicon-32x32.png><link rel=icon type=image/png sizes=16x16 href=/favicon-16x16.png><link rel=manifest href=/manifest.json><link rel=mask-icon href=/safari-pinned-tab.svg color=#5bbad5><link href=/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css rel=stylesheet><link rel=stylesheet href=https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin=anonymous><meta property="og:title" content="MESA源码分析：VC4驱动 - 编译器实现"><meta property="og:description" content="这里先笼统的概括一下编译器部分的工作原理，细节后面再探讨。整个vc4的编译器后端一共进行了两次转换，多级优化，并实现了shader cache"><meta property="og:type" content="article"><meta property="og:url" content="/post/mesa-vc4-compiler/"><meta property="article:section" content="post"><meta property="article:published_time" content="2023-01-07T00:00:00+00:00"><meta property="article:modified_time" content="2023-01-08T11:54:09+08:00"><meta itemprop=name content="MESA源码分析：VC4驱动 - 编译器实现"><meta itemprop=description content="这里先笼统的概括一下编译器部分的工作原理，细节后面再探讨。整个vc4的编译器后端一共进行了两次转换，多级优化，并实现了shader cache"><meta itemprop=datePublished content="2023-01-07T00:00:00+00:00"><meta itemprop=dateModified content="2023-01-08T11:54:09+08:00"><meta itemprop=wordCount content="8860"><meta itemprop=keywords content="mesa,gallium3d,vc4,"><meta name=twitter:card content="summary"><meta name=twitter:title content="MESA源码分析：VC4驱动 - 编译器实现"><meta name=twitter:description content="这里先笼统的概括一下编译器部分的工作原理，细节后面再探讨。整个vc4的编译器后端一共进行了两次转换，多级优化，并实现了shader cache"><!--[if lte IE 9]><script src=https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js></script><![endif]--><!--[if lt IE 9]><script src=https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js></script>
+<!doctype html><html lang=zh-cn><head><meta charset=utf-8><meta http-equiv=x-ua-compatible content="IE=edge,chrome=1"><title>MESA源码分析：VC4驱动 - 编译器实现 - crab2313's blog</title><meta name=renderer content="webkit"><meta name=viewport content="width=device-width,initial-scale=1,maximum-scale=1"><meta http-equiv=cache-control content="no-transform"><meta http-equiv=cache-control content="no-siteapp"><meta name=theme-color content="#f8f5ec"><meta name=msapplication-navbutton-color content="#f8f5ec"><meta name=apple-mobile-web-app-capable content="yes"><meta name=apple-mobile-web-app-status-bar-style content="#f8f5ec"><meta name=author content="crab2313"><meta name=description content="这里先笼统的概括一下编译器部分的工作原理，细节后面再探讨。整个vc4的编译器后端一共进行了两次转换，多级优化，并实现了shader cache"><meta name=keywords content="blog,kernel"><meta name=generator content="Hugo 0.109.0 with theme even"><link rel=canonical href=/post/mesa-vc4-compiler/><link rel=apple-touch-icon sizes=180x180 href=/apple-touch-icon.png><link rel=icon type=image/png sizes=32x32 href=/favicon-32x32.png><link rel=icon type=image/png sizes=16x16 href=/favicon-16x16.png><link rel=manifest href=/manifest.json><link rel=mask-icon href=/safari-pinned-tab.svg color=#5bbad5><link href=/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css rel=stylesheet><link rel=stylesheet href=https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin=anonymous><meta property="og:title" content="MESA源码分析：VC4驱动 - 编译器实现"><meta property="og:description" content="这里先笼统的概括一下编译器部分的工作原理，细节后面再探讨。整个vc4的编译器后端一共进行了两次转换，多级优化，并实现了shader cache"><meta property="og:type" content="article"><meta property="og:url" content="/post/mesa-vc4-compiler/"><meta property="article:section" content="post"><meta property="article:published_time" content="2023-01-07T00:00:00+00:00"><meta property="article:modified_time" content="2023-01-10T09:56:16+08:00"><meta itemprop=name content="MESA源码分析：VC4驱动 - 编译器实现"><meta itemprop=description content="这里先笼统的概括一下编译器部分的工作原理，细节后面再探讨。整个vc4的编译器后端一共进行了两次转换，多级优化，并实现了shader cache"><meta itemprop=datePublished content="2023-01-07T00:00:00+00:00"><meta itemprop=dateModified content="2023-01-10T09:56:16+08:00"><meta itemprop=wordCount content="12267"><meta itemprop=keywords content="mesa,gallium3d,vc4,"><meta name=twitter:card content="summary"><meta name=twitter:title content="MESA源码分析：VC4驱动 - 编译器实现"><meta name=twitter:description content="这里先笼统的概括一下编译器部分的工作原理，细节后面再探讨。整个vc4的编译器后端一共进行了两次转换，多级优化，并实现了shader cache"><!--[if lte IE 9]><script src=https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js></script><![endif]--><!--[if lt IE 9]><script src=https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js></script>
 <script src=https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js></script><![endif]--></head><body><div id=mobile-navbar class=mobile-navbar><div class=mobile-header-logo><a href=/ class=logo>crab2313's blog</a></div><div class=mobile-navbar-icon><span></span>
 <span></span>
-<span></span></div></div><nav id=mobile-menu class="mobile-menu slideout-menu"><ul class=mobile-menu-list><a href=/><li class=mobile-menu-item>Home</li></a><a href=/post/><li class=mobile-menu-item>Archives</li></a><a href=/tags/><li class=mobile-menu-item>Tags</li></a><a href=/categories/><li class=mobile-menu-item>Categories</li></a></ul></nav><div class=container id=mobile-panel><header id=header class=header><div class=logo-wrapper><a href=/ class=logo>crab2313's blog</a></div><nav class=site-navbar><ul id=menu class=menu><li class=menu-item><a class=menu-item-link href=/>Home</a></li><li class=menu-item><a class=menu-item-link href=/post/>Archives</a></li><li class=menu-item><a class=menu-item-link href=/tags/>Tags</a></li><li class=menu-item><a class=menu-item-link href=/categories/>Categories</a></li></ul></nav></header><main id=main class=main><div class=content-wrapper><div id=content class=content><article class=post><header class=post-header><h1 class=post-title>MESA源码分析：VC4驱动 - 编译器实现</h1><div class=post-meta><span class=post-time>2023-01-07</span></div></header><div class=post-toc id=post-toc><h2 class=post-toc-title>文章目录</h2><div class=post-toc-content><nav id=TableOfContents><ul><li><a href=#qir>QIR</a></li><li><a href=#nir转换为qir>NIR转换为QIR</a></li><li><a href=#寄存器分配器>寄存器分配器</a><ul><li><a href=#寄存器集合构建>寄存器集合构建</a></li><li><a href=#冲突图构建>冲突图构建</a></li></ul></li><li><a href=#指令构造器>指令构造器</a></li><li><a href=#code-emitter>Code Emitter</a><ul><li><a href=#queue>Queue</a></li><li><a href=#vc4_generate_code_block>vc4_generate_code_block</a></li><li><a href=#vpm>VPM</a></li><li><a href=#vc4_generate_code>vc4_generate_code</a></li></ul></li><li><a href=#指令调度器>指令调度器</a></li><li><a href=#mesa接口>Mesa接口</a></li></ul></nav></div></div><div class=post-content><p>这里先笼统的概括一下编译器部分的工作原理，细节后面再探讨。整个vc4的编译器后端一共进行了两次转换，多级优化，并实现了shader cache。从代码中可以发现，对一个shader编译是非常昂贵的操作，挑选特定的关键字（即shader的特征状态），根据关键字确定一个shader的唯一性，从而实现cache shader的操作，能极大的减少shader的编译次数，提升总体性能和帧率稳定性。这里列举一下想要进行分析的后端功能点：</p><ul><li>多级转换，最终生成shader二进制指令</li><li>shader cache的工作原理</li><li>多级优化（lowering）的实现原理</li></ul><p>对于多级转换，实际上进行了如下几个转换操作：</p><ul><li>NIR转换成QIR。NIR是目前Mesa主流的IR，是Mesa的GLSL编译器生成TGSI中间表示后，一般要转换而成的中间表示。以前的Mesa驱动一般直接处理TGSI，而现在的Mesa驱动一般将TGSI通过共用功能模块转换成NIR后进行处理。NIR是一种比较便于优化的SSA表示方法。而QIR则是vc4根据自身的QPU特性设计出来的IR表示，这以转换阶段则直接将优化过的NIR转换为QIR表示。</li><li>QIR转换成二进制表示。vc4中实现了code emitter，通过读取QIR，而emit出最终的二进制指令。整个emit过程基本是按照相应的模板进行翻译操作。最后通过优化的方式将ALU A和ALU M相关的操作整合到一起，形成最终的二进制程序。</li></ul><h1 id=qir>QIR</h1><p>QIR是vc4编译器后端的IR表示。NIR经过几轮优化之后，转换成QIR，进一步通过code emitter生成最终的shader指令程序。QIR的指令使用<code>qinst</code>表示，可以看到qinst提供了list_head用于串到一个链表上，且提供了一个op，表示操作类型，并存在source operand和dest operand，以及多个flag。</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt> 1
+<span></span></div></div><nav id=mobile-menu class="mobile-menu slideout-menu"><ul class=mobile-menu-list><a href=/><li class=mobile-menu-item>Home</li></a><a href=/post/><li class=mobile-menu-item>Archives</li></a><a href=/tags/><li class=mobile-menu-item>Tags</li></a><a href=/categories/><li class=mobile-menu-item>Categories</li></a></ul></nav><div class=container id=mobile-panel><header id=header class=header><div class=logo-wrapper><a href=/ class=logo>crab2313's blog</a></div><nav class=site-navbar><ul id=menu class=menu><li class=menu-item><a class=menu-item-link href=/>Home</a></li><li class=menu-item><a class=menu-item-link href=/post/>Archives</a></li><li class=menu-item><a class=menu-item-link href=/tags/>Tags</a></li><li class=menu-item><a class=menu-item-link href=/categories/>Categories</a></li></ul></nav></header><main id=main class=main><div class=content-wrapper><div id=content class=content><article class=post><header class=post-header><h1 class=post-title>MESA源码分析：VC4驱动 - 编译器实现</h1><div class=post-meta><span class=post-time>2023-01-07</span></div></header><div class=post-toc id=post-toc><h2 class=post-toc-title>文章目录</h2><div class=post-toc-content><nav id=TableOfContents><ul><li><a href=#qir>QIR</a></li><li><a href=#nir转换为qir>NIR转换为QIR</a></li><li><a href=#寄存器分配器>寄存器分配器</a><ul><li><a href=#寄存器集合构建>寄存器集合构建</a></li><li><a href=#冲突图构建>冲突图构建</a></li></ul></li><li><a href=#指令构造器>指令构造器</a></li><li><a href=#code-emitter>Code Emitter</a><ul><li><a href=#queue>Queue</a></li><li><a href=#vc4_generate_code_block>vc4_generate_code_block</a></li><li><a href=#vpm>VPM</a></li><li><a href=#vc4_generate_code>vc4_generate_code</a></li></ul></li><li><a href=#指令调度器>指令调度器</a><ul><li><a href=#基本设计>基本设计</a></li><li><a href=#dag构建>DAG构建</a><ul><li><a href=#raddr依赖计算>raddr依赖计算</a></li><li><a href=#waddr依赖计算>waddr依赖计算</a></li><li><a href=#mux依赖计算>MUX依赖计算</a></li><li><a href=#condition依赖计算>Condition依赖计算</a></li><li><a href=#延迟计算>延迟计算</a></li></ul></li><li><a href=#指令调度>指令调度</a></li></ul></li><li><a href=#mesa接口>Mesa接口</a></li></ul></nav></div></div><div class=post-content><p>这里先笼统的概括一下编译器部分的工作原理，细节后面再探讨。整个vc4的编译器后端一共进行了两次转换，多级优化，并实现了shader cache。从代码中可以发现，对一个shader编译是非常昂贵的操作，挑选特定的关键字（即shader的特征状态），根据关键字确定一个shader的唯一性，从而实现cache shader的操作，能极大的减少shader的编译次数，提升总体性能和帧率稳定性。这里列举一下想要进行分析的后端功能点：</p><ul><li>多级转换，最终生成shader二进制指令</li><li>shader cache的工作原理</li><li>多级优化（lowering）的实现原理</li></ul><p>对于多级转换，实际上进行了如下几个转换操作：</p><ul><li>NIR转换成QIR。NIR是目前Mesa主流的IR，是Mesa的GLSL编译器生成TGSI中间表示后，一般要转换而成的中间表示。以前的Mesa驱动一般直接处理TGSI，而现在的Mesa驱动一般将TGSI通过共用功能模块转换成NIR后进行处理。NIR是一种比较便于优化的SSA表示方法。而QIR则是vc4根据自身的QPU特性设计出来的IR表示，这一转换阶段则直接将优化过的NIR转换为QIR表示。</li><li>QIR转换成二进制表示。vc4中实现了code emitter，通过读取QIR，而emit出最终的二进制指令。整个emit过程基本是按照相应的模板进行翻译操作。最后通过优化的方式将ALU A和ALU M相关的操作整合到一起，形成最终的二进制程序。</li></ul><h1 id=qir>QIR</h1><p>QIR是vc4编译器后端的IR表示。NIR经过几轮优化之后，转换成QIR，进一步通过code emitter生成最终的shader指令程序。QIR的指令使用<code>qinst</code>表示，可以看到qinst提供了list_head用于串到一个链表上，且提供了一个op，表示操作类型，并存在source operand和dest operand，以及多个flag。</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt> 1
 </span><span class=lnt> 2
 </span><span class=lnt> 3
 </span><span class=lnt> 4
@@ -495,10 +495,252 @@
 </span><span class=lnt>2
 </span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=line><span class=cl>        <span class=nf>qir_for_each_block</span><span class=p>(</span><span class=n>block</span><span class=p>,</span> <span class=n>c</span><span class=p>)</span>
 </span></span><span class=line><span class=cl>                <span class=nf>vc4_generate_code_block</span><span class=p>(</span><span class=n>c</span><span class=p>,</span> <span class=n>block</span><span class=p>,</span> <span class=n>temp_registers</span><span class=p>);</span>
-</span></span></code></pre></td></tr></table></div></div><p>最后函数调用<code>qpu_schedule_instructions</code>，剩下的都是细节，主要与QPU硬件对二进制可执行程序的一些强制要求有关。</p><h1 id=指令调度器>指令调度器</h1><p>TODO</p><h1 id=mesa接口>Mesa接口</h1><p>这里主要分析gallium3d相关的实现。</p></div><div class=post-copyright><p class=copyright-item><span class=item-title>文章作者</span>
+</span></span></code></pre></td></tr></table></div></div><p>最后函数调用<code>qpu_schedule_instructions</code>，剩下的都是细节，主要与QPU硬件对二进制可执行程序的一些强制要求有关。</p><h1 id=指令调度器>指令调度器</h1><p>从vc4的硬件手册中我们了解到，一条QPU的ALU指令上实际上是同时向两个ALU下发指令的，即有两套opcode的相关字段，分别给QPU的ADD和MUL两个ALU进行指令下发。但是在QIR中可以看到，两个ALU的指令都是独立作为QIR指令的，并没有实现这个特性。事实上，从编译器的设计角度上来看，这部分功能是由指令调度器实现的。vc4的指令调度器实现比较简单，位于<code>vc4_qir_schedule.c</code>文件中，其主要功能为：</p><ul><li>重新排序指令，减小QPU的stall，提升整个程序的性能</li><li>合并两个ALU的operation成为一个独立的instruction</li><li>将block整合成一个程序，并设置好跳转target</li></ul><p>基本上，指令调度器是vc4的shader编译器的最后一个阶段了，在他将已经生成的basic block进行处理，得到最终的可执行程序。</p><h2 id=基本设计>基本设计</h2><p>同大部分编译器一样，vc4的指令调度器基于list scheduler，是目前市面上最常见的指令调度器实现。其基本设计是根据遍历basic block，根据指令依赖关系生成一个有向无环图（DAG），然后通过维护两个列表Active和Ready，从DAG的页节点开始，根据优先级和依赖关系悬着指令进行调度。后面会详细分析vc4使用的算法。</p><p>vc4的指令调度器使用如下结构体表示一次指令调度使用的所有信息：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt>1
+</span><span class=lnt>2
+</span><span class=lnt>3
+</span><span class=lnt>4
+</span><span class=lnt>5
+</span><span class=lnt>6
+</span><span class=lnt>7
+</span><span class=lnt>8
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=line><span class=cl><span class=k>struct</span> <span class=n>choose_scoreboard</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>        <span class=k>struct</span> <span class=n>dag</span> <span class=o>*</span><span class=n>dag</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>        <span class=kt>int</span> <span class=n>tick</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>        <span class=kt>int</span> <span class=n>last_sfu_write_tick</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>        <span class=kt>int</span> <span class=n>last_uniforms_reset_tick</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>        <span class=kt>uint32_t</span> <span class=n>last_waddr_a</span><span class=p>,</span> <span class=n>last_waddr_b</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>        <span class=kt>bool</span> <span class=n>tlb_locked</span><span class=p>;</span>
+</span></span><span class=line><span class=cl><span class=p>};</span>
+</span></span></code></pre></td></tr></table></div></div><p>可以看到，其中<code>dag</code>字段是有向无环图，而tick为算法中使用的cycle计数。vc4通过遍历所有的basic block，进行这个basic block上的指令调度。在<a href=#Queue>Code Emitter</a>中我们看到，调用指令构造器后得到的指令是存放在<code>block->qpu_inst_list</code>链表上的。而很明显这不是最终的shader程序存放的位置，从指令调度器的实现来看，我们发现最终的shader二进制程序存在在一个数组中，即<code>vc4_compile->qpu_inst</code>，并通过<code>qpu_serialize_one_inst</code>接口向数组中添加一个指令。</p><p>从指令调度器的主要入口<code>qpu_schedule_instructions</code>中可以看到，其主要逻辑为：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt> 1
+</span><span class=lnt> 2
+</span><span class=lnt> 3
+</span><span class=lnt> 4
+</span><span class=lnt> 5
+</span><span class=lnt> 6
+</span><span class=lnt> 7
+</span><span class=lnt> 8
+</span><span class=lnt> 9
+</span><span class=lnt>10
+</span><span class=lnt>11
+</span><span class=lnt>12
+</span><span class=lnt>13
+</span><span class=lnt>14
+</span><span class=lnt>15
+</span><span class=lnt>16
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=line><span class=cl>        <span class=kt>uint32_t</span> <span class=n>cycles</span> <span class=o>=</span> <span class=mi>0</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>        <span class=nf>qir_for_each_block</span><span class=p>(</span><span class=n>block</span><span class=p>,</span> <span class=n>c</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>                <span class=n>block</span><span class=o>-&gt;</span><span class=n>start_qpu_ip</span> <span class=o>=</span> <span class=n>c</span><span class=o>-&gt;</span><span class=n>qpu_inst_count</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>                <span class=n>block</span><span class=o>-&gt;</span><span class=n>branch_qpu_ip</span> <span class=o>=</span> <span class=o>~</span><span class=mi>0</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>                <span class=n>cycles</span> <span class=o>+=</span> <span class=nf>qpu_schedule_instructions_block</span><span class=p>(</span><span class=n>c</span><span class=p>,</span>
+</span></span><span class=line><span class=cl>                                                          <span class=o>&amp;</span><span class=n>scoreboard</span><span class=p>,</span>
+</span></span><span class=line><span class=cl>                                                          <span class=n>block</span><span class=p>,</span>
+</span></span><span class=line><span class=cl>                                                          <span class=n>uniform_contents</span><span class=p>,</span>
+</span></span><span class=line><span class=cl>                                                          <span class=n>uniform_data</span><span class=p>,</span>
+</span></span><span class=line><span class=cl>                                                          <span class=o>&amp;</span><span class=n>next_uniform</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>                <span class=n>block</span><span class=o>-&gt;</span><span class=n>end_qpu_ip</span> <span class=o>=</span> <span class=n>c</span><span class=o>-&gt;</span><span class=n>qpu_inst_count</span> <span class=o>-</span> <span class=mi>1</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>        <span class=p>}</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>        <span class=nf>qpu_set_branch_targets</span><span class=p>(</span><span class=n>c</span><span class=p>);</span>
+</span></span></code></pre></td></tr></table></div></div><p>从这里可以看出，这个函数的主要逻辑是遍历所有的block，然后对block进行指令调度，然后将调度后的结果塞入<code>vc4_compile->qpu_inst</code>数组，并记录block在数组中的位置。随后，通过<code>qpu_set_branch_targets</code>函数，将每个basic block的分支跳转语句的目标位置改写，这在编译器的概念中叫relocation。</p><p><code>qpu_schedule_instructions_block</code>函数即是list scheduler的主要实现，关于list scheduler算法，这里不做具体介绍，假定都知道了，如果没有概念，建议看《Engineer A Compiler》，比龙书讲的清楚的多。实际上函数结构非常清晰：</p><ol><li>构建DAG，计算DAG节点的边和相应的延迟</li><li>遍历DAG，开始list scheduler算法，对指令进行调度</li></ol><h2 id=dag构建>DAG构建</h2><p>可以看到，vc4的list scheduler设计简单，没有进行register renaming的步骤，所以要将True Dependences和Antidependences都添加到DAG中。DAG的表示使用了Mesa中通用的helper，创建过程比较简单：</p><ul><li>首先遍历所有的指令创建DAG的顶点</li><li>计算True Dependences，作为有向图的边</li><li>计算Antidependences，作为有向图的边</li><li>计算硬件资源依赖</li><li>从下到上遍历图，计算主要路径的延迟，通过这个延迟当作选择顶点时的优先级，比较经典的做法</li></ul><p>依赖计算使用同一个算法跑两轮的形式，分别从头到尾，再从尾到头对指令序列进行处理，这两个函数分别为：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt> 1
+</span><span class=lnt> 2
+</span><span class=lnt> 3
+</span><span class=lnt> 4
+</span><span class=lnt> 5
+</span><span class=lnt> 6
+</span><span class=lnt> 7
+</span><span class=lnt> 8
+</span><span class=lnt> 9
+</span><span class=lnt>10
+</span><span class=lnt>11
+</span><span class=lnt>12
+</span><span class=lnt>13
+</span><span class=lnt>14
+</span><span class=lnt>15
+</span><span class=lnt>16
+</span><span class=lnt>17
+</span><span class=lnt>18
+</span><span class=lnt>19
+</span><span class=lnt>20
+</span><span class=lnt>21
+</span><span class=lnt>22
+</span><span class=lnt>23
+</span><span class=lnt>24
+</span><span class=lnt>25
+</span><span class=lnt>26
+</span><span class=lnt>27
+</span><span class=lnt>28
+</span><span class=lnt>29
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=line><span class=cl><span class=k>static</span> <span class=kt>void</span>
+</span></span><span class=line><span class=cl><span class=nf>calculate_forward_deps</span><span class=p>(</span><span class=k>struct</span> <span class=n>vc4_compile</span> <span class=o>*</span><span class=n>c</span><span class=p>,</span> <span class=k>struct</span> <span class=n>dag</span> <span class=o>*</span><span class=n>dag</span><span class=p>,</span>
+</span></span><span class=line><span class=cl>                       <span class=k>struct</span> <span class=n>list_head</span> <span class=o>*</span><span class=n>schedule_list</span><span class=p>)</span>
+</span></span><span class=line><span class=cl><span class=p>{</span>
+</span></span><span class=line><span class=cl>        <span class=k>struct</span> <span class=n>schedule_state</span> <span class=n>state</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>        <span class=nf>memset</span><span class=p>(</span><span class=o>&amp;</span><span class=n>state</span><span class=p>,</span> <span class=mi>0</span><span class=p>,</span> <span class=k>sizeof</span><span class=p>(</span><span class=n>state</span><span class=p>));</span>
+</span></span><span class=line><span class=cl>        <span class=n>state</span><span class=p>.</span><span class=n>dag</span> <span class=o>=</span> <span class=n>dag</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>        <span class=n>state</span><span class=p>.</span><span class=n>dir</span> <span class=o>=</span> <span class=n>F</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>        <span class=nf>list_for_each_entry</span><span class=p>(</span><span class=k>struct</span> <span class=n>schedule_node</span><span class=p>,</span> <span class=n>node</span><span class=p>,</span> <span class=n>schedule_list</span><span class=p>,</span> <span class=n>link</span><span class=p>)</span>
+</span></span><span class=line><span class=cl>                <span class=nf>calculate_deps</span><span class=p>(</span><span class=o>&amp;</span><span class=n>state</span><span class=p>,</span> <span class=n>node</span><span class=p>);</span>
+</span></span><span class=line><span class=cl><span class=p>}</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl><span class=k>static</span> <span class=kt>void</span>
+</span></span><span class=line><span class=cl><span class=nf>calculate_reverse_deps</span><span class=p>(</span><span class=k>struct</span> <span class=n>vc4_compile</span> <span class=o>*</span><span class=n>c</span><span class=p>,</span> <span class=k>struct</span> <span class=n>dag</span> <span class=o>*</span><span class=n>dag</span><span class=p>,</span>
+</span></span><span class=line><span class=cl>                       <span class=k>struct</span> <span class=n>list_head</span> <span class=o>*</span><span class=n>schedule_list</span><span class=p>)</span>
+</span></span><span class=line><span class=cl><span class=p>{</span>
+</span></span><span class=line><span class=cl>        <span class=k>struct</span> <span class=n>schedule_state</span> <span class=n>state</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>        <span class=nf>memset</span><span class=p>(</span><span class=o>&amp;</span><span class=n>state</span><span class=p>,</span> <span class=mi>0</span><span class=p>,</span> <span class=k>sizeof</span><span class=p>(</span><span class=n>state</span><span class=p>));</span>
+</span></span><span class=line><span class=cl>        <span class=n>state</span><span class=p>.</span><span class=n>dag</span> <span class=o>=</span> <span class=n>dag</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>        <span class=n>state</span><span class=p>.</span><span class=n>dir</span> <span class=o>=</span> <span class=n>R</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>        <span class=nf>list_for_each_entry_rev</span><span class=p>(</span><span class=k>struct</span> <span class=n>schedule_node</span><span class=p>,</span> <span class=n>node</span><span class=p>,</span> <span class=n>schedule_list</span><span class=p>,</span>
+</span></span><span class=line><span class=cl>                                <span class=n>link</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>                <span class=nf>calculate_deps</span><span class=p>(</span><span class=o>&amp;</span><span class=n>state</span><span class=p>,</span> <span class=p>(</span><span class=k>struct</span> <span class=n>schedule_node</span> <span class=o>*</span><span class=p>)</span><span class=n>node</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>        <span class=p>}</span>
+</span></span><span class=line><span class=cl><span class=p>}</span>
+</span></span></code></pre></td></tr></table></div></div><p>在<code> calculate_deps</code>函数中可以通过传入的<code>schedule_state</code>参数的<code>dir</code>字段对这一batch是从头到尾还是从尾到头进行判断。<code>schedule_state</code>变量的定义如下：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt> 1
+</span><span class=lnt> 2
+</span><span class=lnt> 3
+</span><span class=lnt> 4
+</span><span class=lnt> 5
+</span><span class=lnt> 6
+</span><span class=lnt> 7
+</span><span class=lnt> 8
+</span><span class=lnt> 9
+</span><span class=lnt>10
+</span><span class=lnt>11
+</span><span class=lnt>12
+</span><span class=lnt>13
+</span><span class=lnt>14
+</span><span class=lnt>15
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=line><span class=cl><span class=k>struct</span> <span class=n>schedule_state</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>        <span class=k>struct</span> <span class=n>dag</span> <span class=o>*</span><span class=n>dag</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>        <span class=k>struct</span> <span class=n>schedule_node</span> <span class=o>*</span><span class=n>last_r</span><span class=p>[</span><span class=mi>6</span><span class=p>];</span>
+</span></span><span class=line><span class=cl>        <span class=k>struct</span> <span class=n>schedule_node</span> <span class=o>*</span><span class=n>last_ra</span><span class=p>[</span><span class=mi>32</span><span class=p>];</span>
+</span></span><span class=line><span class=cl>        <span class=k>struct</span> <span class=n>schedule_node</span> <span class=o>*</span><span class=n>last_rb</span><span class=p>[</span><span class=mi>32</span><span class=p>];</span>
+</span></span><span class=line><span class=cl>        <span class=k>struct</span> <span class=n>schedule_node</span> <span class=o>*</span><span class=n>last_sf</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>        <span class=k>struct</span> <span class=n>schedule_node</span> <span class=o>*</span><span class=n>last_vpm_read</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>        <span class=k>struct</span> <span class=n>schedule_node</span> <span class=o>*</span><span class=n>last_tmu_write</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>        <span class=k>struct</span> <span class=n>schedule_node</span> <span class=o>*</span><span class=n>last_tlb</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>        <span class=k>struct</span> <span class=n>schedule_node</span> <span class=o>*</span><span class=n>last_vpm</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>        <span class=k>struct</span> <span class=n>schedule_node</span> <span class=o>*</span><span class=n>last_uniforms_reset</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>        <span class=k>enum</span> <span class=n>direction</span> <span class=n>dir</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>        <span class=cm>/* Estimated cycle when the current instruction would start. */</span>
+</span></span><span class=line><span class=cl>        <span class=kt>uint32_t</span> <span class=n>time</span><span class=p>;</span>
+</span></span><span class=line><span class=cl><span class=p>};</span>
+</span></span></code></pre></td></tr></table></div></div><p>其中<code>last_*</code>类型的变量都是指针，指向某个上个进行特定操作的指令，比如读取特定的累加器，或者寄存器bank A。</p><p>这里再提一下为什么同一个算法从头到尾和从尾到头就能把依赖算清楚。首先明确由于是单独的basic block，所以不存在控制依赖的处理，所以仅仅剩数据依赖，而数据依赖分成以下三种情况：</p><ul><li>read after write （True Dependence）</li><li>write after read （Antidependence）</li><li>write after write （Output Dependence）</li></ul><p>由于前面看到并没有使用register renaming处理Antidependence，所以Antidependence也要算成依赖的一种。这时候就可以简化处理的，从头到尾遍历指令序列，处理read after write，write after write，这一算法在反过来从尾到头处理同一指令序列的时候，就跟从头到尾处理write after read和write after write一样了。</p><h3 id=raddr依赖计算>raddr依赖计算</h3><p><code>calculate_deps</code>中首先对raddr造成的依赖进行计算，raddr是ALU指令中对寄存器I/O的地址编码字段，分为bank A和bank B。可以看到<code>calculate_deps</code>中的实现如下：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt>1
+</span><span class=lnt>2
+</span><span class=lnt>3
+</span><span class=lnt>4
+</span><span class=lnt>5
+</span><span class=lnt>6
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=line><span class=cl>        <span class=k>if</span> <span class=p>(</span><span class=n>sig</span> <span class=o>!=</span> <span class=n>QPU_SIG_LOAD_IMM</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>                <span class=nf>process_raddr_deps</span><span class=p>(</span><span class=n>state</span><span class=p>,</span> <span class=n>n</span><span class=p>,</span> <span class=n>raddr_a</span><span class=p>,</span> <span class=nb>true</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>                <span class=k>if</span> <span class=p>(</span><span class=n>sig</span> <span class=o>!=</span> <span class=n>QPU_SIG_SMALL_IMM</span> <span class=o>&amp;&amp;</span>
+</span></span><span class=line><span class=cl>                    <span class=n>sig</span> <span class=o>!=</span> <span class=n>QPU_SIG_BRANCH</span><span class=p>)</span>
+</span></span><span class=line><span class=cl>                        <span class=nf>process_raddr_deps</span><span class=p>(</span><span class=n>state</span><span class=p>,</span> <span class=n>n</span><span class=p>,</span> <span class=n>raddr_b</span><span class=p>,</span> <span class=nb>false</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>        <span class=p>}</span>
+</span></span></code></pre></td></tr></table></div></div><p>其中第一个if判断排除load immediate指令，让ALU指令和Brach和Small Immediate指令通过，这三类指令有<code>raddr_a</code>。而只有ALU指令存在<code>raddr_b</code>字段，所以第二个if排除掉上述的两类指令。<code>process_raddr_deps</code>函数的实现很好理解，首先明确因为raddr是读取的operand，所以当前指令是在读取raddr所指向的位置。</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt> 1
+</span><span class=lnt> 2
+</span><span class=lnt> 3
+</span><span class=lnt> 4
+</span><span class=lnt> 5
+</span><span class=lnt> 6
+</span><span class=lnt> 7
+</span><span class=lnt> 8
+</span><span class=lnt> 9
+</span><span class=lnt>10
+</span><span class=lnt>11
+</span><span class=lnt>12
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=line><span class=cl>        <span class=k>switch</span> <span class=p>(</span><span class=n>raddr</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>        <span class=k>case</span> <span class=nl>QPU_R_VARY</span><span class=p>:</span>
+</span></span><span class=line><span class=cl>                <span class=nf>add_write_dep</span><span class=p>(</span><span class=n>state</span><span class=p>,</span> <span class=o>&amp;</span><span class=n>state</span><span class=o>-&gt;</span><span class=n>last_r</span><span class=p>[</span><span class=mi>5</span><span class=p>],</span> <span class=n>n</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>                <span class=k>break</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>        <span class=k>case</span> <span class=nl>QPU_R_VPM</span><span class=p>:</span>
+</span></span><span class=line><span class=cl>                <span class=nf>add_write_dep</span><span class=p>(</span><span class=n>state</span><span class=p>,</span> <span class=o>&amp;</span><span class=n>state</span><span class=o>-&gt;</span><span class=n>last_vpm_read</span><span class=p>,</span> <span class=n>n</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>                <span class=k>break</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>        <span class=k>case</span> <span class=nl>QPU_R_UNIF</span><span class=p>:</span>
+</span></span><span class=line><span class=cl>                <span class=nf>add_read_dep</span><span class=p>(</span><span class=n>state</span><span class=p>,</span> <span class=n>state</span><span class=o>-&gt;</span><span class=n>last_uniforms_reset</span><span class=p>,</span> <span class=n>n</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>                <span class=k>break</span><span class=p>;</span>
+</span></span></code></pre></td></tr></table></div></div><p>三种情况分别为：</p><ul><li>读取VARY。从文档中看到读取VARY寄存器会导致R5被写入，所以读取VARY的操作和前面对R5的写入有冲突</li><li>读取VPM。VPM读取是连接FIFO的，对VPM的读取会改写VPM寄存器的值，所以事实上和上次的读取是有依赖的</li><li>读取UNIFORM。读取UNIFORM和会重置UNIFORM值的reset是有依赖关系的。</li></ul><p>对于普通的寄存器bank A和bank B的写入，他们与上一个对同一位置的寄存器写入有依赖关系：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt> 1
+</span><span class=lnt> 2
+</span><span class=lnt> 3
+</span><span class=lnt> 4
+</span><span class=lnt> 5
+</span><span class=lnt> 6
+</span><span class=lnt> 7
+</span><span class=lnt> 8
+</span><span class=lnt> 9
+</span><span class=lnt>10
+</span><span class=lnt>11
+</span><span class=lnt>12
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=line><span class=cl>        <span class=k>default</span><span class=o>:</span>
+</span></span><span class=line><span class=cl>                <span class=k>if</span> <span class=p>(</span><span class=n>raddr</span> <span class=o>&lt;</span> <span class=mi>32</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>                        <span class=k>if</span> <span class=p>(</span><span class=n>is_a</span><span class=p>)</span>
+</span></span><span class=line><span class=cl>                                <span class=nf>add_read_dep</span><span class=p>(</span><span class=n>state</span><span class=p>,</span> <span class=n>state</span><span class=o>-&gt;</span><span class=n>last_ra</span><span class=p>[</span><span class=n>raddr</span><span class=p>],</span> <span class=n>n</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>                        <span class=k>else</span>
+</span></span><span class=line><span class=cl>                                <span class=nf>add_read_dep</span><span class=p>(</span><span class=n>state</span><span class=p>,</span> <span class=n>state</span><span class=o>-&gt;</span><span class=n>last_rb</span><span class=p>[</span><span class=n>raddr</span><span class=p>],</span> <span class=n>n</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>                <span class=p>}</span> <span class=k>else</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>                        <span class=nf>fprintf</span><span class=p>(</span><span class=n>stderr</span><span class=p>,</span> <span class=s>&#34;unknown raddr %d</span><span class=se>\n</span><span class=s>&#34;</span><span class=p>,</span> <span class=n>raddr</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>                        <span class=nf>abort</span><span class=p>();</span>
+</span></span><span class=line><span class=cl>                <span class=p>}</span>
+</span></span><span class=line><span class=cl>                <span class=k>break</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>        <span class=p>}</span>
+</span></span></code></pre></td></tr></table></div></div><h3 id=waddr依赖计算>waddr依赖计算</h3><p><code>calculate_deps</code>中对waddr导致的依赖计算如下：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt>1
+</span><span class=lnt>2
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=line><span class=cl>        <span class=nf>process_waddr_deps</span><span class=p>(</span><span class=n>state</span><span class=p>,</span> <span class=n>n</span><span class=p>,</span> <span class=n>waddr_add</span><span class=p>,</span> <span class=nb>true</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>        <span class=nf>process_waddr_deps</span><span class=p>(</span><span class=n>state</span><span class=p>,</span> <span class=n>n</span><span class=p>,</span> <span class=n>waddr_mul</span><span class=p>,</span> <span class=nb>false</span><span class=p>);</span>
+</span></span></code></pre></td></tr></table></div></div><p><code>process_waddr_deps</code>函数中要注意ALU指令的WS字段可以转换ALU写入的寄存器bank，所以要通过该字段判断写入的寄存器bank：</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt>1
+</span><span class=lnt>2
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=line><span class=cl>        <span class=kt>uint64_t</span> <span class=n>inst</span> <span class=o>=</span> <span class=n>n</span><span class=o>-&gt;</span><span class=n>inst</span><span class=o>-&gt;</span><span class=n>inst</span><span class=p>;</span>
+</span></span><span class=line><span class=cl>        <span class=kt>bool</span> <span class=n>is_a</span> <span class=o>=</span> <span class=n>is_add</span> <span class=o>^</span> <span class=p>((</span><span class=n>inst</span> <span class=o>&amp;</span> <span class=n>QPU_WS</span><span class=p>)</span> <span class=o>!=</span> <span class=mi>0</span><span class=p>);</span>
+</span></span></code></pre></td></tr></table></div></div><p>由于从前面看到写入操作与对同一位置的写入操作冲突，所以这里仅仅判断写入位置，然后替换<code>schedule_state</code>里的指针，并添加一条冲突（图的边）即可。</p><h3 id=mux依赖计算>MUX依赖计算</h3><p>我们知道ALU指令source operand的位置是由MUX控制的，可以直接指向累加器或者寄存器bank。所以，可以根据MUX字段的值判断指令是否读取了累加器。</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt>1
+</span><span class=lnt>2
+</span><span class=lnt>3
+</span><span class=lnt>4
+</span><span class=lnt>5
+</span><span class=lnt>6
+</span><span class=lnt>7
+</span><span class=lnt>8
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=line><span class=cl>        <span class=k>if</span> <span class=p>(</span><span class=n>add_op</span> <span class=o>!=</span> <span class=n>QPU_A_NOP</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>                <span class=nf>process_mux_deps</span><span class=p>(</span><span class=n>state</span><span class=p>,</span> <span class=n>n</span><span class=p>,</span> <span class=n>add_a</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>                <span class=nf>process_mux_deps</span><span class=p>(</span><span class=n>state</span><span class=p>,</span> <span class=n>n</span><span class=p>,</span> <span class=n>add_b</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>        <span class=p>}</span>
+</span></span><span class=line><span class=cl>        <span class=k>if</span> <span class=p>(</span><span class=n>mul_op</span> <span class=o>!=</span> <span class=n>QPU_M_NOP</span><span class=p>)</span> <span class=p>{</span>
+</span></span><span class=line><span class=cl>                <span class=nf>process_mux_deps</span><span class=p>(</span><span class=n>state</span><span class=p>,</span> <span class=n>n</span><span class=p>,</span> <span class=n>mul_a</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>                <span class=nf>process_mux_deps</span><span class=p>(</span><span class=n>state</span><span class=p>,</span> <span class=n>n</span><span class=p>,</span> <span class=n>mul_b</span><span class=p>);</span>
+</span></span><span class=line><span class=cl>        <span class=p>}</span>
+</span></span></code></pre></td></tr></table></div></div><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt>1
+</span><span class=lnt>2
+</span><span class=lnt>3
+</span><span class=lnt>4
+</span><span class=lnt>5
+</span><span class=lnt>6
+</span><span class=lnt>7
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=line><span class=cl><span class=k>static</span> <span class=kt>void</span>
+</span></span><span class=line><span class=cl><span class=nf>process_mux_deps</span><span class=p>(</span><span class=k>struct</span> <span class=n>schedule_state</span> <span class=o>*</span><span class=n>state</span><span class=p>,</span> <span class=k>struct</span> <span class=n>schedule_node</span> <span class=o>*</span><span class=n>n</span><span class=p>,</span>
+</span></span><span class=line><span class=cl>                 <span class=kt>uint32_t</span> <span class=n>mux</span><span class=p>)</span>
+</span></span><span class=line><span class=cl><span class=p>{</span>
+</span></span><span class=line><span class=cl>        <span class=k>if</span> <span class=p>(</span><span class=n>mux</span> <span class=o>!=</span> <span class=n>QPU_MUX_A</span> <span class=o>&amp;&amp;</span> <span class=n>mux</span> <span class=o>!=</span> <span class=n>QPU_MUX_B</span><span class=p>)</span>
+</span></span><span class=line><span class=cl>                <span class=nf>add_read_dep</span><span class=p>(</span><span class=n>state</span><span class=p>,</span> <span class=n>state</span><span class=o>-&gt;</span><span class=n>last_r</span><span class=p>[</span><span class=n>mux</span><span class=p>],</span> <span class=n>n</span><span class=p>);</span>
+</span></span><span class=line><span class=cl><span class=p>}</span>
+</span></span></code></pre></td></tr></table></div></div><h3 id=condition依赖计算>Condition依赖计算</h3><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt>1
+</span><span class=lnt>2
+</span><span class=lnt>3
+</span><span class=lnt>4
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-c data-lang=c><span class=line><span class=cl>        <span class=nf>process_cond_deps</span><span class=p>(</span><span class=n>state</span><span class=p>,</span> <span class=n>n</span><span class=p>,</span> <span class=nf>QPU_GET_FIELD</span><span class=p>(</span><span class=n>inst</span><span class=p>,</span> <span class=n>QPU_COND_ADD</span><span class=p>));</span>
+</span></span><span class=line><span class=cl>        <span class=nf>process_cond_deps</span><span class=p>(</span><span class=n>state</span><span class=p>,</span> <span class=n>n</span><span class=p>,</span> <span class=nf>QPU_GET_FIELD</span><span class=p>(</span><span class=n>inst</span><span class=p>,</span> <span class=n>QPU_COND_MUL</span><span class=p>));</span>
+</span></span><span class=line><span class=cl>        <span class=k>if</span> <span class=p>((</span><span class=n>inst</span> <span class=o>&amp;</span> <span class=n>QPU_SF</span><span class=p>)</span> <span class=o>&amp;&amp;</span> <span class=n>sig</span> <span class=o>!=</span> <span class=n>QPU_SIG_BRANCH</span><span class=p>)</span>
+</span></span><span class=line><span class=cl>                <span class=nf>add_write_dep</span><span class=p>(</span><span class=n>state</span><span class=p>,</span> <span class=o>&amp;</span><span class=n>state</span><span class=o>-&gt;</span><span class=n>last_sf</span><span class=p>,</span> <span class=n>n</span><span class=p>);</span>
+</span></span></code></pre></td></tr></table></div></div><p>实现比较简单，<code>process_cond_deps</code>中简单对所有设置了condition code的指令添加了读取依赖。</p><h3 id=延迟计算>延迟计算</h3><p>延迟计算使用的经典方法，即深度优先算法遍历整个图，计算单个指令到程序结尾的最小延迟。后面会根据最小延迟来作为优先级判断依据，优先使用最小延迟最大的节点进行调度。</p><h2 id=指令调度>指令调度</h2><p>TODO</p><h1 id=mesa接口>Mesa接口</h1><p>这里主要分析gallium3d相关的实现。</p></div><div class=post-copyright><p class=copyright-item><span class=item-title>文章作者</span>
 <span class=item-content>crab2313</span></p><p class=copyright-item><span class=item-title>上次更新</span>
-<span class=item-content>2023-01-08
-<a href=https://github.com/crab2313/blog-doc/commit/eb67d8465ff93d8461628b5339811adf7e207139 title="blog: update mesa-vc4-compiler">(eb67d84)</a></span></p></div><footer class=post-footer><div class=post-tags><a href=/tags/mesa/>mesa</a>
+<span class=item-content>2023-01-10
+<a href=https://github.com/crab2313/blog-doc/commit/cfd91093790d3e1fb16c6b7d402005910a1dc371 title="blog: update mesa-vc4-compiler">(cfd9109)</a></span></p></div><footer class=post-footer><div class=post-tags><a href=/tags/mesa/>mesa</a>
 <a href=/tags/gallium3d/>gallium3d</a>
 <a href=/tags/vc4/>vc4</a></div><nav class=post-nav><a class=next href=/post/mesa-vc4/><span class="next-text nav-default">MESA源码分析：VC4驱动</span>
 <span class="next-text nav-mobile">下一篇</span>
